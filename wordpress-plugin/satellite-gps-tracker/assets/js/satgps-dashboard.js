@@ -468,6 +468,54 @@
 		}).catch(function () {});
 	}
 
+	// ---- export (CSV / GPX) ----------------------------------------------
+	// Everything the device sends is stored server-side, so the dashboard can
+	// build a downloadable file from the selected range entirely in the browser.
+	function isoZ(ts) { return String(ts || '').replace(' ', 'T') + 'Z'; }
+	function triggerDownload(filename, mime, text) {
+		var blob = new Blob([text], { type: mime });
+		var url = URL.createObjectURL(blob);
+		var a = document.createElement('a');
+		a.href = url; a.download = filename;
+		document.body.appendChild(a); a.click(); a.remove();
+		setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+	}
+	function toCsv(points) {
+		var cols = ['ts_utc', 'lat', 'lon', 'alt_m', 'speed_kmh', 'vspeed_ms', 'heading_deg', 'hdop', 'acc_h_m', 'sats_used'];
+		var lines = [cols.join(',')];
+		points.forEach(function (p) {
+			lines.push([isoZ(p.ts), p.lat, p.lon, p.alt_m, p.speed_kmh, p.vspeed_ms, p.heading_deg, p.hdop, p.acc_h_m, p.sats_used].join(','));
+		});
+		return lines.join('\r\n') + '\r\n';
+	}
+	function toGpx(points, device) {
+		var out = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+			'<gpx version="1.1" creator="Satellite GPS Tracker" xmlns="http://www.topografix.com/GPX/1/1">\n' +
+			'  <trk><name>' + esc(device || 'track') + '</name><trkseg>\n';
+		points.forEach(function (p) {
+			out += '    <trkpt lat="' + p.lat + '" lon="' + p.lon + '"><ele>' + p.alt_m + '</ele><time>' + isoZ(p.ts) + '</time></trkpt>\n';
+		});
+		return out + '  </trkseg></trk>\n</gpx>\n';
+	}
+	function fileStamp() {
+		var d = new Date(); function z(n) { return (n < 10 ? '0' : '') + n; }
+		return d.getFullYear() + z(d.getMonth() + 1) + z(d.getDate()) + '-' + z(d.getHours()) + z(d.getMinutes());
+	}
+	function exportTrack(format, btn) {
+		var label = btn ? btn.textContent : '';
+		if (btn) { btn.disabled = true; btn.textContent = '…'; }
+		function done() { if (btn) { btn.disabled = false; btn.textContent = label; } }
+		api('track', { device: state.device, from: rangeToFrom(state.range), limit: 10000 }).then(function (res) {
+			var pts = (res && res.points) || [];
+			if (!pts.length) { alert('No fixes in the selected range to export.'); done(); return; }
+			var dev = state.device || 'all';
+			var base = 'satgps-' + dev.replace(/[^A-Za-z0-9_-]/g, '') + '-' + fileStamp();
+			if (format === 'gpx') { triggerDownload(base + '.gpx', 'application/gpx+xml', toGpx(pts, dev)); }
+			else { triggerDownload(base + '.csv', 'text/csv;charset=utf-8', toCsv(pts)); }
+			done();
+		}).catch(function () { alert('Export failed — could not fetch the track from the server.'); done(); });
+	}
+
 	// ---- help modal -------------------------------------------------------
 	var HELP = {
 		skyplot: '<h3>Sky plot</h3><p>Each dot is a satellite the receiver can hear right now. The centre of the circle is straight up (the zenith); the outer edge is the horizon. The direction around the circle is the compass bearing (N at the top). Colour shows signal strength. Satellites spread across the whole sky give the best position accuracy.</p>',
@@ -501,6 +549,10 @@
 		if (rng) rng.addEventListener('change', function () { state.range = rng.value; refreshHistory(); });
 		var live = $('#satgps-live');
 		if (live) live.addEventListener('change', function () { state.live = live.checked; startLive(); });
+		var csvBtn = $('#satgps-export-csv');
+		if (csvBtn) csvBtn.addEventListener('click', function () { exportTrack('csv', csvBtn); });
+		var gpxBtn = $('#satgps-export-gpx');
+		if (gpxBtn) gpxBtn.addEventListener('click', function () { exportTrack('gpx', gpxBtn); });
 	}
 
 	function init() {

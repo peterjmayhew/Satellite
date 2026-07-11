@@ -79,6 +79,18 @@
 }
 .satgps-live-toggle { color: var(--satgps-text); font-weight: 600; }
 
+/* Export buttons */
+.satgps-export { display: inline-flex; align-items: center; gap: 6px; }
+.satgps-export-label { color: var(--satgps-muted); font-size: 12px; }
+.satgps-export-btn {
+	background: var(--satgps-card-2); color: var(--satgps-text);
+	border: 1px solid var(--satgps-border); border-radius: 8px;
+	padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+	line-height: 1; transition: border-color .2s, color .2s;
+}
+.satgps-export-btn:hover { border-color: var(--satgps-accent); color: #fff; }
+.satgps-export-btn:disabled { opacity: .55; cursor: default; }
+
 .satgps-status-dot {
 	width: 11px; height: 11px; border-radius: 50%;
 	background: var(--satgps-muted);

@@ -43,6 +43,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 				<input type="checkbox" id="satgps-live" checked />
 				<?php esc_html_e( 'Live', 'satgps' ); ?>
 			</label>
+			<span class="satgps-export">
+				<span class="satgps-export-label"><?php esc_html_e( 'Export', 'satgps' ); ?></span>
+				<button type="button" class="satgps-export-btn" id="satgps-export-csv" title="<?php esc_attr_e( 'Download the selected range as CSV', 'satgps' ); ?>">CSV</button>
+				<button type="button" class="satgps-export-btn" id="satgps-export-gpx" title="<?php esc_attr_e( 'Download the selected range as a GPX track', 'satgps' ); ?>">GPX</button>
+			</span>
 		</div>
 	</div>
 

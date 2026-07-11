@@ -4,7 +4,7 @@ Tags: gps, gnss, tracker, esp32, map
 Requires at least: 5.8
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.4.3
+Stable tag: 1.4.4
 License: GPLv2 or later
 
 Receive live GNSS telemetry from an ESP32 satellite receiver and present it as an
@@ -52,6 +52,12 @@ Ingest requires the secret API key in the `X-API-Key` header (constant-time
 compared). Read endpoints are admin-only unless you enable "Public dashboard".
 
 == Changelog ==
+
+= 1.4.4 =
+* New: CSV and GPX export buttons on the dashboard toolbar — download the track
+  for the selected device and time range straight to your computer (GPX opens in
+  Google Earth, mapping and GIS tools). Generated in the browser from the stored
+  data; no extra server load.
 
 = 1.4.3 =
 * Fix: the "?" help pop-ups were unreadable — the modal renders outside the
