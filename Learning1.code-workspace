@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "../Learning1"
+		},
+		{
+			"name": "Sat_receiver",
+			"path": "../Sat_receiver"
+		},
+		{
+			"name": "testing",
+			"path": "../testing"
+		},
+		{
+			"name": "Satellite",
+			"path": "."
+		}
+	],
+	"settings": {}
+}

@@ -1,0 +1,383 @@
+#include <Arduino.h>
+#include <string.h>
+#include <math.h>
+#if USE_UBX
+
+    #include "gps_ubx.h"
+    #include "timesync.h"
+    #include "gnss_extra.h"   // skySats[], skyAddSat(), skyReset()
+
+    // Globals defined in main.cpp
+    extern float altitudeM, hdop;
+    extern float accH_m, accV_m, vspeed_ms, hae_m, geoidSep_m, speedAcc_ms, headAcc_deg, vdop, pdop;
+    extern int fixType;
+    extern bool sbasUsed;
+    extern int rfJamState, rfJamInd, rfAgcPct, rfAntStatus, spoofState;
+    extern uint32_t ttffMs;
+    extern float errMajorM, errMinorM, errOrientDeg;
+
+    // Link diagnostics (defined in main.cpp)
+    extern uint32_t diagBytesRx, diagNmeaCount, diagUbxSync, diagUbxFrames, diagUbxBadCk, diagCfgSends, diagLastByteMs;
+    extern uint32_t diagNavPvt, diagNavDop, diagNavStatus, diagNavCov, diagNavSat, diagMonRf;
+    extern uint8_t diagRing[64];
+    extern uint8_t diagRingIdx;
+
+    // ---- Config ----
+    // 5 Hz keeps NAV-PVT+NAV-DOP+NAV-SAT within the 38400-baud UART budget.
+    static const uint16_t NAV_RATE_HZ = 5;
+    static const bool ENABLE_NAV_SAT = true;
+
+    // ---------------- UBX framing ----------------
+    static const uint8_t SYNC1 = 0xB5;
+    static const uint8_t SYNC2 = 0x62;
+
+    static uint8_t cls_ = 0, id_ = 0;
+    static uint16_t len_ = 0;
+    static uint16_t payloadPos_ = 0;
+    static uint8_t ckA_ = 0, ckB_ = 0;
+    static uint8_t rxCkA_ = 0, rxCkB_ = 0;
+
+    static enum { WAIT1, WAIT2, C, I, L1, L2, PAY, CKA, CKB } st_ = WAIT1;
+    static uint8_t payload_[512];
+
+    static inline void ckUpdate(uint8_t b){ ckA_ = ckA_ + b; ckB_ = ckB_ + ckA_; }
+    static inline uint16_t u16(const uint8_t *p){ return (uint16_t)p[0] | ((uint16_t)p[1] << 8); }
+    static inline uint32_t u32(const uint8_t *p){ return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
+    static inline int32_t  i32(const uint8_t *p){ return (int32_t)u32(p); }
+    static inline float    f32(const uint8_t *p){ float f; memcpy(&f, p, 4); return f; } // LE IEEE-754
+    static inline String two(int v){ return (v < 10) ? "0" + String(v) : String(v); }
+
+    static void setUtcStrings(int year,int mon,int day,int hr,int mi,int se){
+    timeUTC = two(hr)+":"+two(mi)+":"+two(se);
+    dateUTC = two(day)+"/"+two(mon)+"/"+String(year);
+    }
+
+    // --------------- UBX send/config ---------------
+    static void sendUbx(HardwareSerial &gps, uint8_t cls, uint8_t id, const uint8_t *pl, uint16_t n) {
+    uint8_t a=0,b=0;
+    auto upd=[&](uint8_t x){ a=a+x; b=b+a; };
+
+    gps.write(SYNC1); gps.write(SYNC2);
+    gps.write(cls); upd(cls);
+    gps.write(id);  upd(id);
+
+    uint8_t l1=(uint8_t)(n & 0xFF), l2=(uint8_t)(n >> 8);
+    gps.write(l1); upd(l1);
+    gps.write(l2); upd(l2);
+
+    for (uint16_t i=0;i<n;i++){ gps.write(pl[i]); upd(pl[i]); }
+
+    gps.write(a); gps.write(b);
+    }
+
+    static void cfgMsgRate(HardwareSerial &gps, uint8_t msgClass, uint8_t msgId, uint8_t rateUart1) {
+    uint8_t p[8] = { msgClass, msgId, 0, rateUart1, 0, 0, 0, 0 };
+    sendUbx(gps, 0x06, 0x01, p, 8);
+    }
+
+    // CFG-VALSET a single U1 (byte) configuration key into RAM (M9 config interface).
+    static void cfgValSetU1(HardwareSerial &gps, uint32_t key, uint8_t val) {
+    uint8_t p[9] = {
+        0x00,        // version
+        0x01,        // layer = RAM
+        0x00, 0x00,  // reserved
+        (uint8_t)(key & 0xFF), (uint8_t)((key >> 8) & 0xFF),
+        (uint8_t)((key >> 16) & 0xFF), (uint8_t)((key >> 24) & 0xFF),
+        val
+    };
+    sendUbx(gps, 0x06, 0x8A, p, 9);
+    }
+
+    static void cfgRate(HardwareSerial &gps, uint16_t hz) {
+    if (hz < 1) hz = 1;
+    if (hz > 25) hz = 25;
+
+    uint16_t measRate = (uint16_t)(1000 / hz);
+    uint8_t p[6] = {
+        (uint8_t)(measRate & 0xFF), (uint8_t)(measRate >> 8),
+        1, 0,   // navRate=1
+        0, 0    // timeRef=UTC
+    };
+    sendUbx(gps, 0x06, 0x08, p, 6);
+    }
+
+    static void configureForUbx(HardwareSerial &gps) {
+    diagCfgSends++;
+    cfgRate(gps, NAV_RATE_HZ);
+
+    // Enable NAV-PVT (01 07) every epoch
+    cfgMsgRate(gps, 0x01, 0x07, 1);
+
+    // Enable NAV-DOP (01 04) every epoch — full DOP suite (real HDOP/VDOP/PDOP)
+    cfgMsgRate(gps, 0x01, 0x04, 1);
+
+    // Enable NAV-SAT (01 35) every 5th epoch (~1 Hz at 5 Hz base) to save bandwidth
+    if (ENABLE_NAV_SAT) cfgMsgRate(gps, 0x01, 0x35, 5);
+
+    // Enable NAV-STATUS (01 03) ~1 Hz — time-to-first-fix + spoofing detection
+    cfgMsgRate(gps, 0x01, 0x03, 5);
+
+    // Enable NAV-COV (01 36) ~1 Hz — position covariance -> horizontal error ellipse
+    cfgMsgRate(gps, 0x01, 0x36, 5);
+
+    // Enable MON-RF (0A 38) every ~5 s — RF interference/jamming + antenna health
+    cfgMsgRate(gps, 0x0A, 0x38, 25);
+
+    // Ensure SBAS is enabled (EGNOS over Europe) — usually default-on; make it explicit.
+    // CFG-SIGNAL-SBAS_ENA = 0x10310020. Non-fatal if the module ignores it.
+    cfgValSetU1(gps, 0x10310020, 1);
+
+    // Enable the RF interference monitor so MON-RF jammingState is populated.
+    // CFG-ITFM-ENABLE = 0x1041000d. Non-fatal if the module ignores it.
+    cfgValSetU1(gps, 0x1041000d, 1);
+
+    // Disable common NMEA sentences (class 0xF0)
+    cfgMsgRate(gps, 0xF0, 0x00, 0); // GGA
+    cfgMsgRate(gps, 0xF0, 0x03, 0); // GSV
+    cfgMsgRate(gps, 0xF0, 0x04, 0); // RMC
+    cfgMsgRate(gps, 0xF0, 0x05, 0); // VTG
+    cfgMsgRate(gps, 0xF0, 0x02, 0); // GSA
+    cfgMsgRate(gps, 0xF0, 0x08, 0); // ZDA
+    }
+
+    // --------------- UBX handlers ---------------
+    // NAV-PVT (01 07) length 92 — the primary fix message (position, velocity,
+    // accuracy estimates, time). Byte offsets per the u-blox M9 interface desc.
+    static void handleNavPvt(const uint8_t *p, uint16_t n) {
+    if (n < 92) return;
+
+    uint16_t year = u16(p + 4);
+    uint8_t month = p[6], day = p[7], hour = p[8], minute = p[9], sec = p[10];
+    uint8_t valid = p[11];
+
+    uint8_t ftype = p[20];
+    uint8_t flags = p[21];
+    uint8_t numSV = p[23];
+
+    int32_t  lon_i        = i32(p + 24);
+    int32_t  lat_i        = i32(p + 28);
+    int32_t  hEll_mm      = i32(p + 32);   // height above WGS84 ellipsoid (mm)
+    int32_t  hMSL_mm      = i32(p + 36);   // height above mean sea level (mm)
+    uint32_t hAcc_mm      = u32(p + 40);   // horizontal accuracy estimate (mm)
+    uint32_t vAcc_mm      = u32(p + 44);   // vertical accuracy estimate (mm)
+    int32_t  velD_mms     = i32(p + 56);   // NED down velocity (mm/s)
+    int32_t  gSpeed_mms   = i32(p + 60);   // 2D ground speed (mm/s)
+    int32_t  headMot_1e5  = i32(p + 64);   // heading of motion (1e-5 deg)
+    uint32_t sAcc_mms     = u32(p + 68);   // speed accuracy estimate (mm/s)
+    uint32_t headAcc_1e5  = u32(p + 72);   // heading accuracy estimate (1e-5 deg)
+    uint16_t pDOP_e2      = u16(p + 76);   // position DOP (0.01 units)
+
+    bool validTime = (valid & 0x03) == 0x03;
+    bool fixOk = (flags & 0x01) != 0;
+
+    fixType         = (int)ftype;
+    sbasUsed        = (flags & 0x02) != 0;   // diffSoln: differential/SBAS corrections applied
+    satellitesSCRN1 = (int)numSV;
+    gpsFix = fixOk && (ftype >= 2);
+
+    if (gpsFix) {
+        longitude   = (float)lon_i * 1e-7f;
+        latitude    = (float)lat_i * 1e-7f;
+        altitudeM   = (float)hMSL_mm / 1000.0f;
+        hae_m       = (float)hEll_mm / 1000.0f;
+        geoidSep_m  = (float)(hEll_mm - hMSL_mm) / 1000.0f;
+        accH_m      = (float)hAcc_mm / 1000.0f;
+        accV_m      = (float)vAcc_mm / 1000.0f;
+        vspeed_ms   = -(float)velD_mms / 1000.0f;         // NED "down" -> positive up
+        speedKmph   = ((float)gSpeed_mms / 1000.0f) * 3.6f;
+        speedAcc_ms = (float)sAcc_mms / 1000.0f;
+        heading     = (float)headMot_1e5 * 1e-5f;
+        headAcc_deg = (float)headAcc_1e5 * 1e-5f;
+        pdop        = (float)pDOP_e2 * 0.01f;             // NAV-DOP refines the full DOP suite
+
+        if (validTime) {
+        setUtcStrings((int)year, (int)month, (int)day, (int)hour, (int)minute, (int)sec);
+        syncTimeFromGPS(dateUTC, timeUTC);
+        }
+    }
+    }
+
+    // NAV-DOP (01 04) length 18 — dilution-of-precision suite (0.01 units each).
+    // This provides the genuine HDOP/VDOP (NAV-PVT only carries pDOP).
+    static void handleNavDop(const uint8_t *p, uint16_t n) {
+    if (n < 18) return;
+    pdop = (float)u16(p + 6)  * 0.01f;
+    vdop = (float)u16(p + 10) * 0.01f;
+    hdop = (float)u16(p + 12) * 0.01f;
+    }
+
+    // NAV-STATUS (01 03) length 16 — time-to-first-fix + spoofing detection.
+    static void handleNavStatus(const uint8_t *p, uint16_t n) {
+    if (n < 16) return;
+    uint8_t flags2 = p[7];
+    spoofState = (flags2 >> 3) & 0x03;   // 0 unknown, 1 none, 2 indicated, 3 multiple
+    ttffMs = u32(p + 8);
+    }
+
+    // MON-RF (0A 38) — RF interference/jamming + antenna diagnostics.
+    // 4-byte header (version, nBlocks, reserved[2]) then 24 bytes per RF block.
+    static void handleMonRf(const uint8_t *p, uint16_t n) {
+    if (n < 4) return;
+    uint8_t nBlocks = p[1];
+    if (nBlocks < 1 || n < (uint16_t)(4 + 24)) return;
+
+    const uint8_t *b = p + 4;              // first RF block (single band on M9N)
+    rfJamState  = b[1] & 0x03;             // flags: jammingState (0..3)
+    rfAntStatus = b[2];                    // 0 init,1 unknown,2 ok,3 short,4 open
+    uint16_t agc = u16(b + 14);            // agcCnt, 0..8191
+    rfAgcPct = (int)((uint32_t)agc * 100u / 8191u);
+    rfJamInd = b[16];                      // CW jamming indicator, 0..255
+    }
+
+    // NAV-COV (01 36) length 64 — position/velocity covariance (NED, m^2).
+    // Derive the horizontal error ellipse from the 2x2 N/E position covariance.
+    static void handleNavCov(const uint8_t *p, uint16_t n) {
+    if (n < 64) return;
+    if (p[5] == 0) return;                 // posCovValid == 0 -> not usable
+
+    float cNN = f32(p + 16);               // posCovNN (m^2)
+    float cNE = f32(p + 20);               // posCovNE
+    float cEE = f32(p + 28);               // posCovEE
+
+    // Eigenvalues of [[cNN,cNE],[cNE,cEE]]
+    float tr = cNN + cEE;
+    float det = cNN * cEE - cNE * cNE;
+    float disc = tr * tr / 4.0f - det;
+    if (disc < 0) disc = 0;
+    float s = sqrtf(disc);
+    float l1 = tr / 2.0f + s;               // larger eigenvalue
+    float l2 = tr / 2.0f - s;               // smaller eigenvalue
+    if (l1 < 0) l1 = 0;
+    if (l2 < 0) l2 = 0;
+
+    errMajorM = sqrtf(l1);                   // 1-sigma std dev (m)
+    errMinorM = sqrtf(l2);
+
+    // Bearing of the major axis from North (deg), folded to 0..180
+    float ang = 0.5f * atan2f(2.0f * cNE, cNN - cEE) * 180.0f / 3.14159265f;
+    if (ang < 0) ang += 180.0f;
+    errOrientDeg = ang;
+    }
+
+    // NAV-SAT (01 35) length = 8 + 12*numSvs
+    // NAV-SAT (01 35) length = 8 + 12*numSvs
+    static void handleNavSat(const uint8_t *p, uint16_t n) {
+        if (!ENABLE_NAV_SAT) return;
+        if (n < 8) return;
+
+        uint8_t numSvs = p[5];
+        uint16_t need = 8 + (uint16_t)numSvs * 12;
+        if (n < need) return;
+
+        // UBX delivers every satellite in a single NAV-SAT message per epoch,
+        // so clear the list once at the start of each message.
+        skyReset();
+
+        for (uint8_t i = 0; i < numSvs; i++) {
+            const uint8_t *sv = p + 8 + (uint16_t)i * 12;
+
+            uint8_t gnssId = sv[0];
+            uint8_t svId   = sv[1];
+            uint8_t cno    = sv[2];         // C/N0 in dB-Hz
+            int8_t elev    = (int8_t)sv[3];
+            int16_t azim   = (int16_t)u16(sv + 4);
+            uint32_t svFlags = u32(sv + 8); // per-SV flags word
+            bool used = (svFlags >> 3) & 0x01; // bit 3 = svUsed (used in solution)
+
+            char talker='?';
+            if (gnssId == 0) talker='P';      // GPS
+            else if (gnssId == 6) talker='L'; // GLONASS
+            else if (gnssId == 2) talker='A'; // Galileo
+            else if (gnssId == 3) talker='B'; // BeiDou
+            else if (gnssId == 5) talker='Q'; // QZSS
+
+            int prn = (int)svId;
+            int snr = (int)cno;
+
+            if (prn > 0) {
+            skyAddSat(prn, (int)elev, (int)azim, snr, talker, used);
+            }
+        }
+        
+    }
+    static void dispatchUbx(uint8_t cls, uint8_t id, const uint8_t *p, uint16_t n) {
+    if (cls == 0x01 && id == 0x07)      { diagNavPvt++;    handleNavPvt(p, n); }
+    else if (cls == 0x01 && id == 0x04) { diagNavDop++;    handleNavDop(p, n); }
+    else if (cls == 0x01 && id == 0x03) { diagNavStatus++; handleNavStatus(p, n); }
+    else if (cls == 0x01 && id == 0x36) { diagNavCov++;    handleNavCov(p, n); }
+    else if (cls == 0x01 && id == 0x35) { diagNavSat++;    handleNavSat(p, n); }
+    else if (cls == 0x0A && id == 0x38) { diagMonRf++;     handleMonRf(p, n); }
+    }
+
+    // --------------- Public API ---------------
+    static bool g_ubxSeen = false;      // set once a valid UBX frame is received
+    static uint32_t g_lastCfgMs = 0;    // last time configuration was (re)sent
+
+    void gpsParserInit(HardwareSerial &gps) {
+    delay(200);                          // let the receiver finish booting first
+    configureForUbx(gps);
+    g_ubxSeen = false;
+    g_lastCfgMs = millis();
+    }
+
+    void gpsParserProcess(HardwareSerial &gps) {
+    while (gps.available()) {
+        uint8_t b = (uint8_t)gps.read();
+        diagBytesRx++;
+        diagLastByteMs = millis();
+        diagRing[diagRingIdx] = b; diagRingIdx = (diagRingIdx + 1) & 63;
+        if (b == 0x24) diagNmeaCount++;   // '$' = start of an NMEA sentence
+
+        switch (st_) {
+        case WAIT1:
+            if (b == SYNC1) st_ = WAIT2;
+            break;
+        case WAIT2:
+            if (b == SYNC2) { st_ = C; diagUbxSync++; }
+            else st_ = WAIT1;
+            break;
+        case C:
+            cls_ = b; ckA_=0; ckB_=0; ckUpdate(b); st_ = I; break;
+        case I:
+            id_ = b; ckUpdate(b); st_ = L1; break;
+        case L1:
+            len_ = b; ckUpdate(b); st_ = L2; break;
+        case L2:
+            len_ |= ((uint16_t)b << 8); ckUpdate(b);
+            payloadPos_ = 0;
+            if (len_ > sizeof(payload_)) st_ = WAIT1;
+            else st_ = (len_ == 0) ? CKA : PAY;
+            break;
+        case PAY:
+            payload_[payloadPos_++] = b; ckUpdate(b);
+            if (payloadPos_ >= len_) st_ = CKA;
+            break;
+        case CKA:
+            rxCkA_ = b; st_ = CKB; break;
+        case CKB:
+            rxCkB_ = b;
+            if (rxCkA_ == ckA_ && rxCkB_ == ckB_) {
+            diagUbxFrames++;
+            if (!g_ubxSeen) { g_ubxSeen = true; Serial.println("[ubx] link up - receiving UBX frames"); }
+            dispatchUbx(cls_, id_, payload_, len_);
+            } else {
+            diagUbxBadCk++;
+            }
+            st_ = WAIT1;
+            break;
+        }
+    }
+
+    // If no UBX frame has arrived yet, keep re-sending the configuration. This
+    // recovers from a slow receiver boot, or a receiver still in NMEA mode.
+    // If you see this message repeat forever, the config is not reaching the
+    // module -> check the ESP TX (GPIO17) -> module RX wiring.
+    if (!g_ubxSeen && (millis() - g_lastCfgMs > 3000)) {
+        Serial.println("[ubx] no UBX frames yet - resending configuration...");
+        configureForUbx(gps);
+        g_lastCfgMs = millis();
+    }
+    }
+
+// ... rest of file
+#endif

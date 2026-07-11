@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Satellite GPS Tracker - local preview</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="../satellite-gps-tracker/assets/css/satgps.css" />
+<style>
+	body { margin: 0; background: #0a0d15; font-family: system-ui, sans-serif; padding: 18px; }
+	.preview-note { color: #97a3b6; max-width: 900px; margin: 0 auto 14px; font-size: 13px; }
+	.preview-note code { color: #e7ecf5; }
+	.satgps-app { max-width: 1100px; margin: 0 auto; }
+</style>
+</head>
+<body>
+
+<div class="preview-note">
+	Local preview of the actual dashboard assets. Start the mock server and the
+	simulator first:<br />
+	<code>python mock_server.py --port 8787 --key testkey123</code> &nbsp;then&nbsp;
+	<code>python simulate_device.py --url http://127.0.0.1:8787/wp-json/satgps/v1/ingest --key testkey123 --count 0 --interval 2 --device sim-01</code>
+</div>
+
+<!-- Mirrors templates/dashboard.php (static, no PHP) -->
+<div id="satgps-app" class="satgps-app">
+	<div class="satgps-toolbar">
+		<div class="satgps-toolbar-left">
+			<span class="satgps-stat" id="satgps-link-stat">
+				<span class="satgps-status-dot" id="satgps-status-dot"></span>
+				<span class="satgps-status-text" id="satgps-status-text">Connecting…</span>
+			</span>
+			<span class="satgps-stat" id="satgps-gps-stat">
+				<span class="satgps-status-dot" id="satgps-gps-dot"></span>
+				<span class="satgps-status-text" id="satgps-gps-text">GPS —</span>
+			</span>
+		</div>
+		<div class="satgps-toolbar-right">
+			<label class="satgps-inline">Device <select id="satgps-device"></select></label>
+			<label class="satgps-inline">Range
+				<select id="satgps-range">
+					<option value="1h">Last hour</option>
+					<option value="6h">Last 6 hours</option>
+					<option value="24h" selected>Last 24 hours</option>
+					<option value="7d">Last 7 days</option>
+					<option value="30d">Last 30 days</option>
+				</select>
+			</label>
+			<label class="satgps-inline satgps-live-toggle"><input type="checkbox" id="satgps-live" checked /> Live</label>
+		</div>
+	</div>
+
+	<div class="satgps-tiles">
+		<div class="satgps-tile" data-tile="fix"><div class="satgps-tile-label">Fix</div><div class="satgps-tile-value" data-field="fix">—</div><div class="satgps-tile-sub" data-field="fix_sub"></div></div>
+		<div class="satgps-tile"><div class="satgps-tile-label">Satellites</div><div class="satgps-tile-value" data-field="sats_used">—</div><div class="satgps-tile-sub">used / <span data-field="sats_in_view">—</span> in view</div></div>
+		<div class="satgps-tile"><div class="satgps-tile-label">Speed</div><div class="satgps-tile-value" data-field="speed">—</div><div class="satgps-tile-sub" data-field="speed_unit"></div></div>
+		<div class="satgps-tile"><div class="satgps-tile-label">Altitude</div><div class="satgps-tile-value" data-field="alt">—</div><div class="satgps-tile-sub" data-field="alt_sub">m above sea level</div></div>
+		<div class="satgps-tile"><div class="satgps-tile-label">Accuracy</div><div class="satgps-tile-value" data-field="acc">—</div><div class="satgps-tile-sub" data-field="acc_sub"></div></div>
+		<div class="satgps-tile"><div class="satgps-tile-label">Heading</div><div class="satgps-tile-value" data-field="heading">—</div><div class="satgps-tile-sub" data-field="heading_cardinal"></div></div>
+	</div>
+
+	<div class="satgps-grid-2">
+		<section class="satgps-card">
+			<h2>Position &amp; track</h2>
+			<div id="satgps-map" class="satgps-map"></div>
+			<div class="satgps-coords"><span data-field="latlon">—</span><span class="satgps-muted" data-field="last_ts"></span></div>
+		</section>
+		<section class="satgps-card">
+			<h2>Sky plot <button type="button" class="satgps-help" data-help="skyplot">?</button></h2>
+			<canvas id="satgps-skyplot" width="320" height="320" class="satgps-skyplot"></canvas>
+			<div class="satgps-legend" id="satgps-sky-legend"></div>
+		</section>
+	</div>
+
+	<div class="satgps-grid-2">
+		<section class="satgps-card">
+			<h2>Signal strength (C/N₀) <button type="button" class="satgps-help" data-help="snr">?</button></h2>
+			<div class="satgps-chart-wrap"><canvas id="satgps-snr"></canvas></div>
+		</section>
+		<section class="satgps-card">
+			<h2>Constellations in view</h2>
+			<div class="satgps-const" id="satgps-const"></div>
+		</section>
+	</div>
+
+	<section class="satgps-card">
+		<h2>Receiver health &amp; integrity <button type="button" class="satgps-help" data-help="rf">?</button></h2>
+		<div class="satgps-tiles satgps-tiles-compact">
+			<div class="satgps-tile"><div class="satgps-tile-label">Interference</div><div class="satgps-tile-value" data-field="jam">—</div><div class="satgps-tile-sub" data-field="jam_sub"></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label">AGC</div><div class="satgps-tile-value" data-field="agc">—</div><div class="satgps-tile-sub">gain level</div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label">Antenna</div><div class="satgps-tile-value" data-field="ant">—</div><div class="satgps-tile-sub">supervisor</div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label">Spoofing</div><div class="satgps-tile-value" data-field="spoof">—</div><div class="satgps-tile-sub">detection</div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label">Time to fix</div><div class="satgps-tile-value" data-field="ttff">—</div><div class="satgps-tile-sub">cold/warm start</div></div>
+		</div>
+	</section>
+
+	<div class="satgps-grid-2">
+		<section class="satgps-card"><h2>Speed over time</h2><div class="satgps-chart-wrap"><canvas id="satgps-speed-chart"></canvas></div></section>
+		<section class="satgps-card"><h2>Altitude over time</h2><div class="satgps-chart-wrap"><canvas id="satgps-alt-chart"></canvas></div></section>
+	</div>
+
+	<div class="satgps-grid-2">
+		<section class="satgps-card"><h2>Vertical speed over time</h2><div class="satgps-chart-wrap"><canvas id="satgps-vspeed-chart"></canvas></div></section>
+		<section class="satgps-card"><h2>Accuracy over time</h2><div class="satgps-chart-wrap"><canvas id="satgps-acc-chart"></canvas></div></section>
+	</div>
+
+	<section class="satgps-card">
+		<h2>Trip statistics <span class="satgps-muted" data-field="range_label"></span></h2>
+		<div class="satgps-tiles satgps-tiles-compact">
+			<div class="satgps-tile"><div class="satgps-tile-label">Distance</div><div class="satgps-tile-value" data-field="distance">—</div><div class="satgps-tile-sub" data-field="distance_unit"></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label">Max speed</div><div class="satgps-tile-value" data-field="max_speed">—</div><div class="satgps-tile-sub" data-field="max_speed_unit"></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label">Avg speed</div><div class="satgps-tile-value" data-field="avg_speed">—</div><div class="satgps-tile-sub" data-field="avg_speed_unit"></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label">Moving time</div><div class="satgps-tile-value" data-field="moving_time">—</div><div class="satgps-tile-sub">h:m:s</div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label">Max altitude</div><div class="satgps-tile-value" data-field="max_alt">—</div><div class="satgps-tile-sub">m</div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label">Data points</div><div class="satgps-tile-value" data-field="points">—</div><div class="satgps-tile-sub">fixes</div></div>
+		</div>
+	</section>
+
+	<p class="satgps-footer satgps-muted">Satellite GPS Tracker · <span data-field="device_footer"></span></p>
+</div>
+
+<div id="satgps-help-modal" class="satgps-modal" hidden>
+	<div class="satgps-modal-box"><button type="button" class="satgps-modal-close">&times;</button><div id="satgps-help-content"></div></div>
+</div>
+
+<script>
+	window.satgpsData = {
+		restUrl: 'http://127.0.0.1:8787/wp-json/satgps/v1/',
+		nonce: '',
+		isAdmin: true,
+		units: 'kmh',
+		mapZoom: 14
+	};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="../satellite-gps-tracker/assets/js/satgps-skyplot.js"></script>
+<script src="../satellite-gps-tracker/assets/js/satgps-dashboard.js"></script>
+</body>
+</html>

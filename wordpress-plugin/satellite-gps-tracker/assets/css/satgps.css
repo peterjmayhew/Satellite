@@ -1,0 +1,235 @@
+/* Satellite GPS Tracker dashboard styles */
+
+.satgps-app {
+	--satgps-bg: #0f1420;
+	--satgps-card: #171d2b;
+	--satgps-card-2: #1e2637;
+	--satgps-border: #2a3346;
+	--satgps-text: #e7ecf5;
+	--satgps-muted: #97a3b6;
+	--satgps-accent: #4c8bf5;
+	--satgps-ok: #22c55e;
+	--satgps-warn: #f59e0b;
+	--satgps-bad: #ef4444;
+	--satgps-radius: 12px;
+
+	color: var(--satgps-text);
+	background: var(--satgps-bg);
+	padding: 16px;
+	border-radius: var(--satgps-radius);
+	font-size: 14px;
+	line-height: 1.45;
+	margin-top: 12px;
+}
+
+.satgps-app *,
+.satgps-app *::before,
+.satgps-app *::after {
+	box-sizing: border-box;
+}
+
+/* Toolbar */
+.satgps-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 16px;
+}
+.satgps-toolbar-left { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; font-weight: 600; }
+.satgps-stat { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.satgps-toolbar-right { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.satgps-inline { display: inline-flex; align-items: center; gap: 6px; color: var(--satgps-muted); }
+.satgps-inline select,
+.satgps-app select {
+	/* appearance:none makes the control fully CSS-rendered, so the OS can't
+	   repaint its text colour on hover (which made the label vanish on hover in
+	   some browsers, e.g. Chrome on Windows). It also removes the native arrow,
+	   so we supply our own chevron below. */
+	-webkit-appearance: none;
+	-moz-appearance: none;
+	appearance: none;
+	background-color: var(--satgps-card-2);
+	color: var(--satgps-text);
+	-webkit-text-fill-color: var(--satgps-text);
+	border: 1px solid var(--satgps-border);
+	border-radius: 8px;
+	padding: 4px 26px 4px 8px;
+	font-size: 13px;
+	cursor: pointer;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2397a3b6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 8px center;
+}
+.satgps-inline select:hover,
+.satgps-inline select:focus,
+.satgps-app select:hover,
+.satgps-app select:focus,
+.satgps-app select:active {
+	color: var(--satgps-text);
+	-webkit-text-fill-color: var(--satgps-text);
+	background-color: var(--satgps-card-2);
+	border-color: var(--satgps-accent);
+	outline: none;
+}
+.satgps-app select option {
+	background: var(--satgps-card-2);
+	color: var(--satgps-text);
+}
+.satgps-live-toggle { color: var(--satgps-text); font-weight: 600; }
+
+.satgps-status-dot {
+	width: 11px; height: 11px; border-radius: 50%;
+	background: var(--satgps-muted);
+	box-shadow: 0 0 0 3px rgba(255,255,255,.06);
+	transition: background .3s;
+}
+.satgps-status-dot.is-online { background: var(--satgps-ok); }
+.satgps-status-dot.is-stale  { background: var(--satgps-warn); }
+.satgps-status-dot.is-offline{ background: var(--satgps-bad); }
+
+/* Tiles */
+.satgps-tiles {
+	display: grid;
+	grid-template-columns: repeat(6, 1fr);
+	gap: 12px;
+	margin-bottom: 16px;
+}
+.satgps-tiles-compact { grid-template-columns: repeat(6, 1fr); }
+.satgps-tile {
+	background: linear-gradient(180deg, var(--satgps-card-2), var(--satgps-card));
+	border: 1px solid var(--satgps-border);
+	border-radius: var(--satgps-radius);
+	padding: 12px 14px;
+	min-height: 78px;
+}
+.satgps-tile-label { color: var(--satgps-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.satgps-tile-value { font-size: 26px; font-weight: 700; line-height: 1.15; margin-top: 2px; }
+.satgps-tile-sub { color: var(--satgps-muted); font-size: 12px; }
+.satgps-tile[data-tile="fix"] .satgps-tile-value.is-ok  { color: var(--satgps-ok); }
+.satgps-tile[data-tile="fix"] .satgps-tile-value.is-bad { color: var(--satgps-bad); }
+.satgps-tile-value.is-ok   { color: var(--satgps-ok); }
+.satgps-tile-value.is-warn { color: var(--satgps-warn); }
+.satgps-tile-value.is-bad  { color: var(--satgps-bad); }
+
+/* Cards + grids */
+.satgps-grid-2 {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 16px;
+	margin-bottom: 16px;
+	align-items: start;   /* don't stretch a card to match its taller sibling */
+}
+
+/* Fixed-height wrapper so Chart.js (maintainAspectRatio:false) can't grow the
+   canvas to fill a stretching card. */
+.satgps-chart-wrap { position: relative; width: 100%; height: 200px; }
+.satgps-chart-wrap canvas { max-height: 200px; }
+.satgps-card {
+	background: var(--satgps-card);
+	border: 1px solid var(--satgps-border);
+	border-radius: var(--satgps-radius);
+	padding: 14px 16px;
+	margin-bottom: 16px;
+}
+.satgps-grid-2 .satgps-card { margin-bottom: 0; }
+.satgps-card h2 {
+	margin: 0 0 12px;
+	font-size: 15px;
+	color: var(--satgps-text);
+	display: flex; align-items: center; gap: 8px;
+}
+
+.satgps-map { width: 100%; height: 360px; border-radius: 10px; overflow: hidden; background: #0b0f18; }
+.satgps-frontend .satgps-map { height: var(--satgps-map-height, 420px); }
+.satgps-coords { margin-top: 8px; display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+
+.satgps-skyplot { display: block; margin: 0 auto; max-width: 100%; }
+.satgps-legend { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 10px; font-size: 12px; color: var(--satgps-muted); }
+.satgps-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.satgps-legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+/* Constellation breakdown */
+.satgps-const { display: flex; flex-direction: column; gap: 10px; }
+.satgps-const-row { display: grid; grid-template-columns: 92px 1fr 58px; gap: 10px; align-items: center; }
+.satgps-const-name { font-weight: 600; }
+.satgps-bar { background: var(--satgps-card-2); border-radius: 6px; height: 16px; overflow: hidden; border: 1px solid var(--satgps-border); }
+.satgps-bar span { display: block; height: 100%; border-radius: 6px 0 0 6px; }
+.satgps-const-count { text-align: right; color: var(--satgps-muted); font-variant-numeric: tabular-nums; }
+
+.satgps-muted { color: var(--satgps-muted); font-weight: 400; font-size: 12px; }
+
+/* Learn / help */
+.satgps-learn details {
+	border: 1px solid var(--satgps-border);
+	border-radius: 8px;
+	padding: 8px 12px;
+	margin-bottom: 8px;
+	background: var(--satgps-card-2);
+}
+.satgps-learn summary { cursor: pointer; font-weight: 600; }
+.satgps-learn p { color: var(--satgps-muted); margin: 8px 0 2px; }
+
+.satgps-help {
+	width: 20px; height: 20px; border-radius: 50%;
+	border: 1px solid var(--satgps-border);
+	background: var(--satgps-card-2); color: var(--satgps-muted);
+	font-size: 12px; cursor: pointer; line-height: 1;
+}
+.satgps-help:hover { color: var(--satgps-text); border-color: var(--satgps-accent); }
+
+.satgps-modal {
+	/* The modal is rendered OUTSIDE .satgps-app, so re-declare the palette here or
+	   its var(--satgps-*) references resolve to nothing — the box goes transparent
+	   and the help text falls back to grey #666 (unreadable over the dark overlay). */
+	--satgps-card: #171d2b;
+	--satgps-card-2: #1e2637;
+	--satgps-border: #2a3346;
+	--satgps-text: #e7ecf5;
+	--satgps-muted: #97a3b6;
+	--satgps-accent: #4c8bf5;
+	--satgps-radius: 12px;
+	position: fixed; inset: 0; z-index: 100000;
+	background: rgba(0,0,0,.6);
+	display: flex; align-items: center; justify-content: center;
+	padding: 20px;
+}
+/* The [hidden] attribute must win over display:flex, or the invisible overlay
+   sits on top of the whole page and swallows every click. */
+.satgps-modal[hidden] { display: none !important; }
+.satgps-modal-box {
+	position: relative;
+	background: var(--satgps-card); color: var(--satgps-text);
+	border: 1px solid var(--satgps-border);
+	border-radius: var(--satgps-radius);
+	max-width: 460px; padding: 22px 24px;
+}
+.satgps-modal-close { position: absolute; top: 8px; right: 12px; background: none; border: none; color: var(--satgps-muted); font-size: 24px; cursor: pointer; }
+
+.satgps-footer { text-align: center; margin: 6px 0 0; }
+
+/* Current-position marker (rotates with heading) */
+.satgps-marker { background: none; border: none; }
+.satgps-arrow {
+	color: var(--satgps-accent, #4c8bf5);
+	font-size: 22px;
+	line-height: 24px;
+	text-align: center;
+	text-shadow: 0 0 3px rgba(0,0,0,.8);
+	transform-origin: 50% 50%;
+}
+
+/* Leaflet dark tweaks */
+.satgps-app .leaflet-container { background: #0b0f18; font: inherit; }
+.satgps-app .leaflet-popup-content-wrapper,
+.satgps-app .leaflet-popup-tip { background: var(--satgps-card); color: var(--satgps-text); }
+
+/* Responsive */
+@media (max-width: 900px) {
+	.satgps-grid-2 { grid-template-columns: 1fr; }
+	.satgps-tiles, .satgps-tiles-compact { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 520px) {
+	.satgps-tiles, .satgps-tiles-compact { grid-template-columns: repeat(2, 1fr); }
+}

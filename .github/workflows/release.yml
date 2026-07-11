@@ -1,0 +1,51 @@
+name: Release WordPress plugin
+
+# Build satellite-gps-tracker.zip and attach it to a GitHub Release whenever a
+# version tag (vX.Y.Z) is pushed. The Plugin Update Checker bundled in the plugin
+# then offers that release as an update on every site running the plugin.
+#
+#   Release flow:
+#     1. Bump "Version:" in wordpress-plugin/satellite-gps-tracker/satellite-gps-tracker.php
+#        (and "Stable tag:" in its readme.txt) to X.Y.Z.
+#     2. Commit, then tag and push:  git tag vX.Y.Z && git push origin vX.Y.Z
+#     3. This workflow builds the zip, verifies the tag matches the header, and
+#        publishes a Release with the zip attached.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # required to create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Verify tag matches plugin version header
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          HEADER=$(grep -oE 'Version:[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+' \
+            wordpress-plugin/satellite-gps-tracker/satellite-gps-tracker.php \
+            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          echo "tag=$TAG  plugin header=$HEADER"
+          if [ "$TAG" != "$HEADER" ]; then
+            echo "::error::Tag v$TAG does not match plugin Version header ($HEADER). Bump the header and re-tag."
+            exit 1
+          fi
+
+      - name: Build plugin zip
+        run: python wordpress-plugin/tools/package.py
+
+      - name: Create Release and attach the plugin zip
+        uses: softprops/action-gh-release@v2
+        with:
+          files: wordpress-plugin/satellite-gps-tracker.zip
+          generate_release_notes: true

@@ -1,0 +1,24 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"name": "YouFibre Monitor",
+			"path": "../YouFibre_Monitor/YouFibre Monitor"
+		},
+		{
+			"name": "Keypanel",
+			"path": "../Keypanel"
+		},
+		{
+			"name": "dinoblaster",
+			"path": "../dinoblaster"
+		},
+		{
+			"name": "Azure Runner",
+			"path": "../Azure Runner"
+		}
+	],
+	"settings": {}
+}

@@ -1,0 +1,87 @@
+=== Satellite GPS Tracker ===
+Contributors: peterjmayhew
+Tags: gps, gnss, tracker, esp32, map
+Requires at least: 5.8
+Tested up to: 6.6
+Requires PHP: 7.4
+Stable tag: 1.4.3
+License: GPLv2 or later
+
+Receive live GNSS telemetry from an ESP32 satellite receiver and present it as an
+interactive map, sky plot, signal charts and trip statistics.
+
+== Description ==
+
+Satellite GPS Tracker is the server half of a DIY GPS logger built around an
+ESP32-S3 and a u-blox NEO-M9N. The device POSTs JSON telemetry to a REST endpoint
+provided by this plugin; the plugin stores it and renders a rich dashboard:
+
+* Live status (fix, satellites, speed, altitude, HDOP/accuracy, heading)
+* Interactive Leaflet map with a speed-coloured track and heading marker
+* Sky plot of every satellite in view, coloured by signal strength
+* Signal-strength (C/N0) bar chart and per-constellation breakdown
+* Speed and altitude history charts
+* Trip statistics (distance, moving time, max/avg speed)
+* Built-in "how this works" explainers
+
+The dashboard is available in wp-admin and, optionally, on the front end via the
+`[satgps_dashboard]` shortcode.
+
+== Installation ==
+
+1. Upload the `satellite-gps-tracker` folder to `/wp-content/plugins/` (or install
+   the ZIP via Plugins > Add New > Upload).
+2. Activate the plugin.
+3. Go to **Satellite GPS > Settings**. Copy the **Ingest endpoint** URL and the
+   **API key** into your ESP32 `include/secrets.h`:
+       #define SATGPS_ENDPOINT "https://your-site/wp-json/satgps/v1/ingest"
+       #define SATGPS_API_KEY  "the-key-shown-on-the-settings-page"
+4. Flash the device. Telemetry will appear on **Satellite GPS > Dashboard**.
+5. (Optional) Tick "Public dashboard" and put `[satgps_dashboard]` on any page to
+   show it to visitors.
+
+== Frequently Asked Questions ==
+
+= Does the map/charts need internet? =
+The viewer's browser loads map tiles (OpenStreetMap) and the Leaflet/Chart.js
+libraries from a CDN, so the browser needs internet. The ingest endpoint itself
+has no external dependencies.
+
+= Is the endpoint secure? =
+Ingest requires the secret API key in the `X-API-Key` header (constant-time
+compared). Read endpoints are admin-only unless you enable "Public dashboard".
+
+== Changelog ==
+
+= 1.4.3 =
+* Fix: the "?" help pop-ups were unreadable — the modal renders outside the
+  dashboard's styling scope, so its text/background CSS variables didn't resolve
+  (transparent box, grey-on-dark text). The palette is now re-declared on the
+  modal so help text is legible.
+
+= 1.4.2 =
+* Clearer status: the toolbar now shows two separate indicators — "Receiver"
+  (is the ESP32 reaching the server?) and "GPS" (does it have a fix?) — so an
+  offline state is never ambiguous between "no data from the device" and "no
+  GPS signal".
+
+= 1.4.1 =
+* Fix: the Device/Range dropdowns' text disappeared on hover in some browsers
+  (native control repaint). The dropdowns now use custom-rendered styling with a
+  chevron, so the label stays visible on hover and focus.
+
+= 1.4.0 =
+* Automatic updates from GitHub Releases via the bundled Plugin Update Checker
+  library. Updates now show on the Plugins screen with one-click update and the
+  per-plugin auto-update toggle — no more manual ZIP uploads.
+
+= 1.3.x =
+* Dashboard fixes: chart height/stretch, modal click-blocking, and versioned
+  cache-busting of CSS/JS.
+
+= 1.1.0 - 1.2.0 =
+* UBX-derived telemetry (accuracy in metres, DOP, receiver health), position
+  error ellipse, and history charts.
+
+= 1.0.0 =
+* Initial release.
