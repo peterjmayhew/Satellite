@@ -232,6 +232,8 @@ static void handleGpsRecovery() {
 #endif
 
 // --- Setup ---
+static void swWatchdogTask(void*);   // software watchdog (defined after setup)
+
 void setup() {
   Serial.begin(115200);
   delay(500);
@@ -267,7 +269,39 @@ void setup() {
   // WiFi uplink to WordPress (non-fatal if it can't connect)
   wifiUplinkInit();
 
+  // Software watchdog: self-heal from ANY main-loop stall. Everything (GPS, TFT,
+  // keypad, WiFi) runs on loopTask, and a blocking call (e.g. a wedged esp_wifi
+  // stop/start) would otherwise freeze the whole device forever — the Arduino
+  // loopTask is NOT on the task watchdog and TWDT panic is off. This independent
+  // core-0 task reboots the board if loop() stops advancing, so a hang becomes a
+  // brief auto-recovery instead of a permanent freeze.
+  xTaskCreatePinnedToCore(swWatchdogTask, "swwdt", 2560, nullptr, 5, nullptr, 0);
+
   Serial.println("Setup complete - starting main loop");
+}
+
+// Incremented at the top of every loop(); watched by swWatchdogTask.
+static volatile uint32_t g_loopBeat = 0;
+
+static void swWatchdogTask(void*) {
+  uint32_t last = 0;
+  uint8_t  stalls = 0;
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    uint32_t beat = g_loopBeat;
+    if (beat == last) {
+      // No legitimate loop() operation takes anywhere near this long (the longest,
+      // a blocking TLS POST, is bounded to ~6 s), so 20 s of no progress = a hang.
+      if (++stalls >= 20) {
+        Serial.println("[swwdt] loop() stalled >20s -> rebooting to self-heal");
+        Serial.flush();
+        ESP.restart();
+      }
+    } else {
+      last = beat;
+      stalls = 0;
+    }
+  }
 }
 
 // --- Forward decls ---
@@ -279,6 +313,7 @@ static void handleAutoRefresh();
 
 // --- Loop ---
 void loop() {
+  g_loopBeat++;   // feed the software watchdog (swWatchdogTask)
   handleHeartbeat();
   handleDebug();
   handleSerialDiag();
@@ -317,10 +352,11 @@ static void handleSerialDiag() {
 #endif
   uint32_t age = (diagLastByteMs == 0) ? 999999UL : (millis() - diagLastByteMs);
 
-  Serial.printf("###DIAG mode=%s ms=%lu bytesRx=%lu nmea=%lu ubxSync=%lu ubxFrames=%lu badCk=%lu cfgSends=%lu fix=%d type=%d sats=%d age=%lu\n",
+  Serial.printf("###DIAG mode=%s ms=%lu bytesRx=%lu nmea=%lu ubxSync=%lu ubxFrames=%lu badCk=%lu cfgSends=%lu fix=%d type=%d sats=%d age=%lu heap=%lu minheap=%lu maxblk=%lu\n",
     mode, (unsigned long)millis(), (unsigned long)diagBytesRx, (unsigned long)diagNmeaCount,
     (unsigned long)diagUbxSync, (unsigned long)diagUbxFrames, (unsigned long)diagUbxBadCk,
-    (unsigned long)diagCfgSends, (int)gpsFix, fixType, satellitesSCRN1, (unsigned long)age);
+    (unsigned long)diagCfgSends, (int)gpsFix, fixType, satellitesSCRN1, (unsigned long)age,
+    (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(), (unsigned long)ESP.getMaxAllocHeap());
 
   Serial.print("###RAW ");
   for (int i = 0; i < 64; i++) {

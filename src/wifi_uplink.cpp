@@ -26,6 +26,7 @@ extern String timeUTC, dateUTC;
 static bool g_enabled = false;
 static uint32_t g_lastPost = 0;
 static uint32_t g_lastReconnect = 0;
+static uint32_t g_reconnectDelayMs = 30000;   // WiFi retry backoff, grows to 5min cap
 
 // Build an ISO-8601 UTC timestamp from the GPS date/time strings.
 // dateUTC = "DD/MM/YYYY", timeUTC = "HH:MM:SS".
@@ -135,6 +136,7 @@ void wifiUplinkInit() {
     return;
   }
   g_enabled = true;
+  WiFi.persistent(false);   // don't rewrite NVS on every begin()/reconnect() attempt
   WiFi.mode(WIFI_STA);
   // Print the exact reason on every disconnect (15=wrong password/handshake
   // timeout, 201=AP not found, 2/4=auth issues, 3/8=deauth/assoc-leave, etc.).
@@ -145,7 +147,13 @@ void wifiUplinkInit() {
   });
   WiFi.setSleep(false);  // keep radio fully awake — modem sleep can make some APs
                          // deauth during the auth handshake (seen as reason=2).
-  WiFi.setAutoReconnect(true);
+  // Take manual control of reconnection. With autoReconnect ON *and* our own
+  // periodic WiFi.begin(), an AP that keeps rejecting auth (reason=2, router
+  // side) produced a tight connect/deauth storm (~1-2 s cadence). That churn is
+  // pointless when the credentials/router won't accept us and needlessly hammers
+  // the WiFi/lwIP stack; our slower timed retry below is enough and recovers
+  // within one interval once the router is fixed.
+  WiFi.setAutoReconnect(false);
 
   // One-shot diagnostic: is the target AP visible from here, and how strong?
   int n = WiFi.scanNetworks();
@@ -167,17 +175,26 @@ void wifiUplinkLoop() {
   uint32_t now = millis();
 
   if (WiFi.status() != WL_CONNECTED) {
-    if (now - g_lastReconnect > 20000) {
+    if (now - g_lastReconnect >= g_reconnectDelayMs) {
       g_lastReconnect = now;
-      Serial.printf("[uplink] WiFi status=%d rssi=%d, reconnecting...\n", (int)WiFi.status(), (int)WiFi.RSSI());
-      // Fully reset the STA (radio off) before begin(), otherwise begin() while
-      // still mid-association throws "cannot set config" and never recovers.
-      WiFi.disconnect(true);
-      delay(50);
-      WiFi.begin(WIFI_SSID, WIFI_PASS);
+      Serial.printf("[uplink] WiFi status=%d, retry (next in %lus)\n",
+                    (int)WiFi.status(), (unsigned long)(g_reconnectDelayMs / 1000));
+      // Non-destructive reconnect: WiFi.reconnect() does a light esp_wifi_disconnect
+      // + reassociate, NOT the WiFi.disconnect(true) -> esp_wifi_stop()/start() radio
+      // teardown. That teardown is a blocking driver call on loopTask that could wedge
+      // and freeze the whole device, and it churns the WiFi heap allocator. Reusing
+      // buffers via reconnect() avoids both.
+      WiFi.reconnect();
+      // Exponential backoff (30s -> 5min cap) so an AP that never authenticates us
+      // (router-side reason=2) can't churn the radio indefinitely. Reset on connect.
+      g_reconnectDelayMs *= 2;
+      if (g_reconnectDelayMs > 300000) g_reconnectDelayMs = 300000;
     }
     return;
   }
+
+  // Connected: clear the backoff so the next outage retries promptly.
+  g_reconnectDelayMs = 30000;
 
   if (now - g_lastPost >= (uint32_t)SATGPS_POST_INTERVAL_MS) {
     g_lastPost = now;

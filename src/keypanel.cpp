@@ -50,18 +50,35 @@ void keypanelInit() {
   }
 }
 
+// Fully NON-BLOCKING key read: returns a key at most once per physical press
+// and NEVER blocks the main loop. The previous version used delay()-based
+// debounce plus a `while (scanOnce()==k) delay(5)` wait-for-release; a stuck,
+// held, or electrically-noisy key made that loop spin forever (delay() yields,
+// so even the task watchdog couldn't catch it) and froze the whole device.
+// Here debounce is tracked across calls via millis(), and a still-pressed key
+// simply stops producing events until it is seen released — no busy-wait.
 char keypanelGetKey() {
+  static char reported = 0;       // key already emitted, waiting to see release
+  static char cand = 0;           // key currently being debounced
+  static uint32_t candSince = 0;  // millis() when cand was first seen
+
   char k = scanOnce();
-  if (!k) return 0;
 
-  // Debounce
-  delay(debounceMs);
-  if (scanOnce() != k) return 0;
+  // Nothing pressed (or key released): clear the latch so the next distinct
+  // press can be reported. This is the only exit a stuck key never reaches —
+  // and because we never loop here, a stuck key just yields no more events.
+  if (k == 0) { reported = 0; cand = 0; return 0; }
 
-  // Wait for release so one press = one event
-  while (scanOnce() == k) {
-    delay(5);
-  }
+  // Same key we already reported and haven't seen released yet: no auto-repeat.
+  if (k == reported) { cand = 0; return 0; }
+
+  // Debounce a new candidate across successive calls (no delay()).
+  if (k != cand) { cand = k; candSince = millis(); return 0; }
+  if ((uint32_t)(millis() - candSince) < debounceMs) return 0;
+
+  // Held stable for debounceMs: emit exactly one event, latch until release.
+  reported = k;
+  cand = 0;
   return k;
 }
 
