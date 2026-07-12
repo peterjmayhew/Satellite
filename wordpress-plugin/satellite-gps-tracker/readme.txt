@@ -4,7 +4,7 @@ Tags: gps, gnss, tracker, esp32, map
 Requires at least: 5.8
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.4.4
+Stable tag: 1.4.5
 License: GPLv2 or later
 
 Receive live GNSS telemetry from an ESP32 satellite receiver and present it as an
@@ -40,6 +40,14 @@ The dashboard is available in wp-admin and, optionally, on the front end via the
 5. (Optional) Tick "Public dashboard" and put `[satgps_dashboard]` on any page to
    show it to visitors.
 
+Shortcode options:
+* `device` - show only one device id (default: all).
+* `height` - map height in pixels (default: 480).
+* `hide_map` - set to "1" to hide the map + coordinates and show a message
+  instead (e.g. to publish the dashboard without revealing exact location).
+* `hide_map_message` - custom text for the hidden-map message.
+  Example: `[satgps_dashboard hide_map="1" hide_map_message="Location shown to family only"]`
+
 == Frequently Asked Questions ==
 
 = Does the map/charts need internet? =
@@ -52,6 +60,12 @@ Ingest requires the secret API key in the `X-API-Key` header (constant-time
 compared). Read endpoints are admin-only unless you enable "Public dashboard".
 
 == Changelog ==
+
+= 1.4.5 =
+* New shortcode option: `[satgps_dashboard hide_map="1"]` hides the map and
+  coordinates and shows a message in their place — handy for embedding the
+  dashboard publicly without revealing exact location. Customise the text with
+  `hide_map_message="…"`.
 
 = 1.4.4 =
 * New: CSV and GPX export buttons on the dashboard toolbar — download the track

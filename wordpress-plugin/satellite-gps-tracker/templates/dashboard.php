@@ -87,13 +87,30 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 	<!-- Map + sky plot -->
 	<div class="satgps-grid-2">
+		<?php
+		// [satgps_dashboard hide_map="1" hide_map_message="…"] hides the map + coordinates
+		// (e.g. to embed the dashboard publicly without revealing exact location).
+		// $atts is only set in the shortcode context; the admin dashboard always shows the map.
+		$satgps_hide_map = isset( $atts ) && is_array( $atts ) && isset( $atts['hide_map'] )
+			&& in_array( strtolower( trim( (string) $atts['hide_map'] ) ), array( '1', 'yes', 'true', 'on' ), true );
+		$satgps_map_msg  = ( isset( $atts ) && is_array( $atts ) && ! empty( $atts['hide_map_message'] ) )
+			? trim( (string) $atts['hide_map_message'] )
+			: __( 'Live location map is hidden.', 'satgps' );
+		?>
 		<section class="satgps-card">
 			<h2><?php esc_html_e( 'Position &amp; track', 'satgps' ); ?></h2>
-			<div id="satgps-map" class="satgps-map"></div>
-			<div class="satgps-coords">
-				<span data-field="latlon">—</span>
-				<span class="satgps-muted" data-field="last_ts"></span>
-			</div>
+			<?php if ( $satgps_hide_map ) : ?>
+				<div class="satgps-map-hidden">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10.5" width="16" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>
+					<span><?php echo esc_html( $satgps_map_msg ); ?></span>
+				</div>
+			<?php else : ?>
+				<div id="satgps-map" class="satgps-map"></div>
+				<div class="satgps-coords">
+					<span data-field="latlon">—</span>
+					<span class="satgps-muted" data-field="last_ts"></span>
+				</div>
+			<?php endif; ?>
 		</section>
 
 		<section class="satgps-card">

@@ -30,8 +30,10 @@ class SatGPS_Shortcode {
 
 		$atts = shortcode_atts(
 			array(
-				'device' => '',
-				'height' => '480',
+				'device'           => '',
+				'height'           => '480',
+				'hide_map'         => '',   // "1"/"yes"/"true" hides the map + coordinates.
+				'hide_map_message' => '',   // Optional custom text shown in place of the map.
 			),
 			$atts,
 			'satgps_dashboard'
