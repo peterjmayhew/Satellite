@@ -26,7 +26,7 @@ extern String timeUTC, dateUTC;
 static bool g_enabled = false;
 static uint32_t g_lastPost = 0;
 static uint32_t g_lastReconnect = 0;
-static uint32_t g_reconnectDelayMs = 30000;   // WiFi retry backoff, grows to 5min cap
+static const uint32_t WIFI_RETRY_MS = 20000;   // gentle reconnect cadence (no auth flood)
 
 // Build an ISO-8601 UTC timestamp from the GPS date/time strings.
 // dateUTC = "DD/MM/YYYY", timeUTC = "HH:MM:SS".
@@ -147,12 +147,13 @@ void wifiUplinkInit() {
   });
   WiFi.setSleep(false);  // keep radio fully awake — modem sleep can make some APs
                          // deauth during the auth handshake (seen as reason=2).
-  // Take manual control of reconnection. With autoReconnect ON *and* our own
-  // periodic WiFi.begin(), an AP that keeps rejecting auth (reason=2, router
-  // side) produced a tight connect/deauth storm (~1-2 s cadence). That churn is
-  // pointless when the credentials/router won't accept us and needlessly hammers
-  // the WiFi/lwIP stack; our slower timed retry below is enough and recovers
-  // within one interval once the router is fixed.
+  // Disable the core auto-reconnect: when the AP is refusing auth (reason=2) it
+  // retries ~every 1-2 s, i.e. a flood of failed authentications. Many routers
+  // treat that as a brute-force attack and temporarily blacklist the device's
+  // MAC, which turns a transient problem into a persistent one. We instead retry
+  // GENTLY from wifiUplinkLoop() (once per WIFI_RETRY_MS), which reconnects fine
+  // when the AP is available but never floods it. (Hang-safety: the retry uses a
+  // LIGHT WiFi.disconnect(), never disconnect(true), plus the software watchdog.)
   WiFi.setAutoReconnect(false);
 
   // One-shot diagnostic: is the target AP visible from here, and how strong?
@@ -175,26 +176,20 @@ void wifiUplinkLoop() {
   uint32_t now = millis();
 
   if (WiFi.status() != WL_CONNECTED) {
-    if (now - g_lastReconnect >= g_reconnectDelayMs) {
+    // Gentle, fixed-interval retry (not the core's ~2 s auto-reconnect storm), so a
+    // rejecting AP is never flooded with failed auths. Reconnects within one
+    // interval once the router side is healthy.
+    if (now - g_lastReconnect >= WIFI_RETRY_MS) {
       g_lastReconnect = now;
-      Serial.printf("[uplink] WiFi status=%d, retry (next in %lus)\n",
-                    (int)WiFi.status(), (unsigned long)(g_reconnectDelayMs / 1000));
-      // Non-destructive reconnect: WiFi.reconnect() does a light esp_wifi_disconnect
-      // + reassociate, NOT the WiFi.disconnect(true) -> esp_wifi_stop()/start() radio
-      // teardown. That teardown is a blocking driver call on loopTask that could wedge
-      // and freeze the whole device, and it churns the WiFi heap allocator. Reusing
-      // buffers via reconnect() avoids both.
-      WiFi.reconnect();
-      // Exponential backoff (30s -> 5min cap) so an AP that never authenticates us
-      // (router-side reason=2) can't churn the radio indefinitely. Reset on connect.
-      g_reconnectDelayMs *= 2;
-      if (g_reconnectDelayMs > 300000) g_reconnectDelayMs = 300000;
+      Serial.printf("[uplink] WiFi status=%d, retrying...\n", (int)WiFi.status());
+      // Explicit credentials every time (robust regardless of persistent()/NVS),
+      // with a LIGHT disconnect() only — never disconnect(true), which does the
+      // blocking esp_wifi_stop()/start() radio teardown that could wedge the loop.
+      WiFi.disconnect();
+      WiFi.begin(WIFI_SSID, WIFI_PASS);
     }
     return;
   }
-
-  // Connected: clear the backoff so the next outage retries promptly.
-  g_reconnectDelayMs = 30000;
 
   if (now - g_lastPost >= (uint32_t)SATGPS_POST_INTERVAL_MS) {
     g_lastPost = now;
