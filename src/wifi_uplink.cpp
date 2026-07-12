@@ -136,8 +136,12 @@ void wifiUplinkInit() {
     return;
   }
   g_enabled = true;
-  WiFi.persistent(false);   // don't rewrite NVS on every begin()/reconnect() attempt
+  WiFi.persistent(false);   // don't rewrite NVS on every begin() attempt
   WiFi.mode(WIFI_STA);
+
+  // Log the STA MAC once so it can be found (or checked against an access-control
+  // list) in the router's admin page without any guesswork.
+  Serial.printf("[uplink] STA MAC %s\n", WiFi.macAddress().c_str());
   // Print the exact reason on every disconnect (15=wrong password/handshake
   // timeout, 201=AP not found, 2/4=auth issues, 3/8=deauth/assoc-leave, etc.).
   WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
@@ -156,16 +160,9 @@ void wifiUplinkInit() {
   // LIGHT WiFi.disconnect(), never disconnect(true), plus the software watchdog.)
   WiFi.setAutoReconnect(false);
 
-  // One-shot diagnostic: is the target AP visible from here, and how strong?
-  int n = WiFi.scanNetworks();
-  int best = -999;
-  for (int i = 0; i < n; i++) {
-    if (WiFi.SSID(i) == String(WIFI_SSID) && WiFi.RSSI(i) > best) best = WiFi.RSSI(i);
-  }
-  if (best > -900) Serial.printf("[uplink] AP \"%s\" seen at %d dBm (%d nets in range)\n", WIFI_SSID, best, n);
-  else Serial.printf("[uplink] AP \"%s\" NOT FOUND (%d nets in range)\n", WIFI_SSID, n);
-  WiFi.scanDelete();
-
+  // NOTE: no WiFi.scanNetworks() here — the long-working build did not scan, and a
+  // scan immediately before begin() leaves the radio mid-scan/idle in a way that
+  // can make the following association fail. Connect straight away instead.
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.printf("[uplink] WiFi connecting to \"%s\"...\n", WIFI_SSID);
 }
