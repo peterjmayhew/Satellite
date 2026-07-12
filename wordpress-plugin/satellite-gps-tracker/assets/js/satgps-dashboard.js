@@ -13,7 +13,10 @@
 		var el = field(name);
 		if (!el) { return; }
 		el.textContent = text;
-		var cls = { ok: ' is-ok', warn: ' is-warn', bad: ' is-bad' }[state] || '';
+		// 'muted' = not measured / not reported yet (grey, informational). Anything
+		// with no explicit state also falls back to muted so a blank reading never
+		// masquerades as a bright "real" value.
+		var cls = { ok: ' is-ok', warn: ' is-warn', bad: ' is-bad', muted: ' is-muted' }[state] || ' is-muted';
 		el.className = 'satgps-tile-value' + cls;
 	}
 	function esc(s) {
@@ -390,19 +393,94 @@
 		setField('last_ts', latest.ts ? 'as of ' + fmtTime(latest.ts) + ' local' : '');
 		setField('device_footer', latest.device || '');
 
-		// Receiver health / integrity (UBX only; shows "Unknown" in NMEA mode)
-		var js = latest.jam_state || 0;
-		setHealth('jam', ['Unknown', 'OK', 'Warning', 'Critical'][js] || 'Unknown',
-			js === 1 ? 'ok' : (js === 2 ? 'warn' : (js === 3 ? 'bad' : '')));
-		setField('jam_sub', 'CW ind ' + (latest.jam_ind || 0));
-		setField('agc', (latest.agc_pct != null ? latest.agc_pct : 0) + '%');
-		var as = latest.ant_status || 0;
-		setHealth('ant', ['Init', 'Unknown', 'OK', 'SHORT', 'OPEN'][as] || '—',
-			as === 2 ? 'ok' : (as >= 3 ? 'bad' : ''));
-		var ss = latest.spoof_state || 0;
-		setHealth('spoof', ['Unknown', 'None', 'Indicated', 'Multiple'][ss] || 'Unknown',
-			ss === 1 ? 'ok' : (ss === 2 ? 'warn' : (ss === 3 ? 'bad' : '')));
-		setField('ttff', latest.ttff_ms > 0 ? (latest.ttff_ms / 1000).toFixed(1) + ' s' : '—');
+		// Receiver health / integrity. Decoded from UBX MON-RF + NAV-STATUS, so the
+		// whole section is blank/grey in plain-NMEA mode. Colour key: grey = not
+		// measured, green = healthy, amber = watch, red = a real problem. "Not
+		// measured" is deliberately distinct from "measured and fine".
+		var worst = 0; // 0 none, 1 ok, 2 watch, 3 problem — for the roll-up chip.
+		function note(state) { var r = { ok: 1, warn: 2, bad: 3 }[state] || 0; if (r > worst) worst = r; }
+
+		// Interference — the receiver's own jamming verdict (ITFM). jam_ind is the
+		// narrowband CW indicator (0-255) shown as a %.
+		var js = latest.jam_state;
+		if (js == null) { setHealth('jam', '—', 'muted'); setField('jam_sub', 'RF jamming monitor'); }
+		else {
+			var js_state = js === 1 ? 'ok' : (js === 2 ? 'warn' : (js === 3 ? 'bad' : 'muted'));
+			setHealth('jam', ['Monitor off', 'Clear', 'Elevated', 'Jammed'][js] || 'Monitor off', js_state);
+			var cw = Math.round((latest.jam_ind || 0) * 100 / 255);
+			setField('jam_sub', 'CW ' + cw + '%');
+			note(js_state);
+		}
+
+		// RF gain (AGC) — automatic front-end gain. Absolute value is only weakly
+		// diagnostic (a sudden swing is the real signal), so it is informational
+		// across the normal band and only amber at the extremes; never red.
+		if (latest.agc_pct == null) { setHealth('agc', '—', 'muted'); }
+		else {
+			var agc = latest.agc_pct;
+			var agc_state = (agc < 20 || agc > 95) ? 'warn' : '';
+			setHealth('agc', agc + '%', agc_state || 'ok'); // green = in the healthy band
+			note(agc_state);
+		}
+		setField('agc_sub', 'front-end gain');
+
+		// Noise floor (broadband) — MON-RF noisePerMS. Counterpart to the CW
+		// indicator: a rising broadband floor is the fingerprint of a wideband
+		// jammer. Absolute scale is receiver-relative, so shown informational.
+		if (latest.noise == null) { setHealth('noise', '—', 'muted'); setField('noise_sub', 'broadband level'); }
+		else { setHealth('noise', String(latest.noise), 'ok'); setField('noise_sub', 'broadband level'); }
+
+		// Antenna feed — needs an antenna-supervisor circuit (bias-tee + current
+		// sense) that this board does not have, so it honestly reads "Not sensed"
+		// (grey) rather than pretending. OK/SHORT/OPEN only on boards wired for it.
+		var as = latest.ant_status;
+		if (as == null || as <= 1) { setHealth('ant', 'Not sensed', 'muted'); }
+		else {
+			var ant_state = as === 2 ? 'ok' : 'bad';
+			setHealth('ant', ['', '', 'OK', 'SHORT', 'OPEN'][as] || '—', ant_state);
+			note(ant_state);
+		}
+
+		// Spoofing — counterfeit-signal check (basic on the M9N: "None" is
+		// reassuring, not a cryptographic guarantee).
+		var ss = latest.spoof_state;
+		if (ss == null || ss === 0) { setHealth('spoof', 'Not checked', 'muted'); }
+		else {
+			var sp_state = ss === 1 ? 'ok' : (ss === 2 ? 'warn' : 'bad');
+			setHealth('spoof', ['Not checked', 'None', 'Suspected', 'Detected'][ss] || 'Not checked', sp_state);
+			note(sp_state);
+		}
+
+		// Time to first fix — one-off startup benchmark, not a live gauge. A cold
+		// start legitimately takes ~30 s; only long times are worth flagging.
+		if (!(latest.ttff_ms > 0)) { setHealth('ttff', '—', 'muted'); }
+		else {
+			var t = latest.ttff_ms;
+			var t_state = t <= 35000 ? 'ok' : (t <= 90000 ? 'warn' : 'bad');
+			setHealth('ttff', (t / 1000).toFixed(1) + ' s', t_state);
+			// TTFF is a startup score, not a live problem, so keep it out of the roll-up.
+		}
+
+		// Roll-up chip: worst live integrity verdict across jam/agc/antenna/spoof.
+		var chip = field('integrity');
+		if (chip) {
+			var label = ['Not measured', 'All clear', 'Watch', 'Problem'][worst];
+			chip.textContent = label;
+			chip.className = 'satgps-tile-value satgps-health-chip ' +
+				['is-muted', 'is-ok', 'is-warn', 'is-bad'][worst];
+		}
+
+		// On-chip odometer (NAV-ODO): hardware-filtered ground distance since the
+		// receiver last powered up. Accurate at low speed and immune to GPS jitter,
+		// unlike the server-side track integration used for "Distance" above.
+		if (latest.odo_m != null && latest.odo_m >= 0) {
+			var odoU = dist(latest.odo_m / 1000);
+			setField('odo', odoU < 10 ? odoU.toFixed(2) : odoU.toFixed(1));
+			var totalStr = (latest.odo_total_m != null)
+				? ' · ' + dist(latest.odo_total_m / 1000).toFixed(0) + ' ' + distUnit + ' total'
+				: '';
+			setField('odo_sub', distUnit + ' · since power-on' + totalStr);
+		}
 	}
 
 	// ---- data flow --------------------------------------------------------
@@ -520,7 +598,14 @@
 	var HELP = {
 		skyplot: '<h3>Sky plot</h3><p>Each dot is a satellite the receiver can hear right now. The centre of the circle is straight up (the zenith); the outer edge is the horizon. The direction around the circle is the compass bearing (N at the top). Colour shows signal strength. Satellites spread across the whole sky give the best position accuracy.</p>',
 		snr: '<h3>Signal strength (C/N&#8320;)</h3><p>Carrier-to-noise density, in dB-Hz, is how cleanly the receiver hears each satellite. Above ~40 is excellent, 30-40 is usable, below 25 is marginal. Buildings, trees and windows lower it.</p>',
-		rf: '<h3>Receiver health &amp; integrity</h3><p>The receiver monitors its own radio front-end. <b>Interference / AGC</b> show whether nearby electronics or deliberate jamming are raising the noise floor (the automatic gain control winds up to compensate). <b>Antenna</b> reports an open or short circuit in the antenna feed. <b>Spoofing</b> flags signals that look artificially generated. <b>Time to fix</b> is how long the last cold/warm start took to acquire a position.</p>'
+		rf: '<h3>Receiver health &amp; integrity</h3><p>These tiles are the receiver grading its own radio health and how far it trusts the fix — a separate question from "do we have a position?". Read the colours as <b>grey = not measured</b>, <b>green = healthy</b>, <b>amber = worth watching</b>, <b>red = a real problem</b>. Everything here is decoded from the u-blox UBX <i>MON-RF</i> and <i>NAV-STATUS</i> messages, so the whole section is blank in plain-NMEA mode. Tap any tile\'s <b>?</b> for detail.</p>',
+		jam: '<h3>Interference</h3><p>Jamming is any radio signal loud enough to bury the faint GNSS signals (satellite power at the antenna is around a millionth of a billionth of a watt). The receiver watches its own front-end and rates the situation <b>Clear</b>, <b>Elevated</b> or <b>Jammed</b>. The small <b>CW</b> figure is its narrowband (continuous-wave) indicator — a nearby oscillator or a cheap "GPS blocker" pushes it up. Grey "Monitor off" means the interference monitor hasn\'t reported yet.</p>',
+		agc: '<h3>RF gain (AGC)</h3><p>Automatic Gain Control is the receiver\'s automatic volume knob: it rides high and steady when the air is clean, and drops fast when something loud (a jammer) appears. So a steady reading is healthy and a <i>sudden lurch</i> is the interesting event — the exact percentage on its own does not mean good or bad. It is only flagged amber at the extremes (very low = front-end backing right off; very high = starved input, e.g. a disconnected antenna).</p>',
+		noise: '<h3>Noise floor</h3><p>The broadband background noise level the receiver sees, straight from MON-RF. It is the counterpart to the narrowband CW indicator: a rising <i>noise floor</i> is the fingerprint of a wideband jammer, whereas a rising <i>CW</i> figure is a single narrowband carrier. The number is on the receiver\'s own internal scale, so watch it for changes rather than reading an absolute threshold.</p>',
+		ant: '<h3>Antenna feed</h3><p>On boards wired for it, this catches a broken or shorted antenna cable. Doing so needs a small supervisor circuit that senses the current flowing up the coax to a <i>powered</i> (active) antenna. This tracker doesn\'t include that circuit, so the receiver can\'t tell and reports <b>Not sensed</b> — which is why it stays grey rather than green. That is expected here, not a fault.</p>',
+		spoof: '<h3>Spoofing</h3><p>Where jamming shouts over the satellites, spoofing impersonates them — broadcasting counterfeit signals to trick the receiver about where or when it is. The M9N runs simple consistency checks and reports <b>None</b>, <b>Suspected</b> or <b>Detected</b>. It is a lightweight check, so a green "None" is good news but not absolute proof.</p>',
+		ttff: '<h3>Time to first fix</h3><p>A stopwatch on the receiver\'s last boot: the time from power-on to its first position fix. Starting cold — no memory of the time, almanac or where it was — takes about half a minute; a warm restart is only seconds. A long time usually just means it booted somewhere with a poor view of the sky. It stays fixed after that first fix, so treat it as a startup score, not a live gauge.</p>',
+		odo: '<h3>Odometer</h3><p>The receiver\'s own trip counter: cumulative ground distance travelled since it last powered up, computed on-chip. Because it is hardware-filtered it stays accurate at walking pace and shrugs off the GPS jitter that can inflate a distance worked out by joining up track points. The "total" figure is the module\'s lifetime distance across all trips.</p>'
 	};
 	function initHelp() {
 		var modal = $('#satgps-help-modal'), content = $('#satgps-help-content');

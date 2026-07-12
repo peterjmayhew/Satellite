@@ -121,9 +121,27 @@
 .satgps-tile-sub { color: var(--satgps-muted); font-size: 12px; }
 .satgps-tile[data-tile="fix"] .satgps-tile-value.is-ok  { color: var(--satgps-ok); }
 .satgps-tile[data-tile="fix"] .satgps-tile-value.is-bad { color: var(--satgps-bad); }
-.satgps-tile-value.is-ok   { color: var(--satgps-ok); }
-.satgps-tile-value.is-warn { color: var(--satgps-warn); }
-.satgps-tile-value.is-bad  { color: var(--satgps-bad); }
+.satgps-tile-value.is-ok    { color: var(--satgps-ok); }
+.satgps-tile-value.is-warn  { color: var(--satgps-warn); }
+.satgps-tile-value.is-bad   { color: var(--satgps-bad); }
+/* Neutral "not measured / not reported yet" state — must read as informational,
+   not alarming. Without this, a 0/"Unknown" reading fell through to the bright
+   --satgps-text and looked like a real (bad) value. */
+.satgps-tile-value.is-muted { color: var(--satgps-muted); font-weight: 600; }
+
+/* Per-tile help button (small, sits inline in the tile label row). */
+.satgps-tile-label { display: flex; align-items: center; gap: 6px; }
+.satgps-help-sm {
+	width: 15px; height: 15px; line-height: 13px; font-size: 10px;
+	padding: 0; border-radius: 50%; flex: 0 0 auto;
+}
+/* Colour key for the receiver-health tiles. */
+.satgps-health-key {
+	display: flex; flex-wrap: wrap; gap: 12px;
+	margin: 0 0 12px; font-size: 12px; color: var(--satgps-muted);
+}
+.satgps-health-key span { display: inline-flex; align-items: center; gap: 5px; }
+.satgps-health-key i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 
 /* Cards + grids */
 .satgps-grid-2 {

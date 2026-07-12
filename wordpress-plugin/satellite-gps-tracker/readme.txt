@@ -4,7 +4,7 @@ Tags: gps, gnss, tracker, esp32, map
 Requires at least: 5.8
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.4.5
+Stable tag: 1.4.6
 License: GPLv2 or later
 
 Receive live GNSS telemetry from an ESP32 satellite receiver and present it as an
@@ -60,6 +60,20 @@ Ingest requires the secret API key in the `X-API-Key` header (constant-time
 compared). Read endpoints are admin-only unless you enable "Public dashboard".
 
 == Changelog ==
+
+= 1.4.6 =
+* Clearer "Receiver health & integrity" section. Every tile now has honest
+  labels, a plain-English "?" explainer, real good/watch/problem thresholds and
+  a distinct grey "not measured" state, so a blank reading no longer looks like a
+  fault. A colour key and an at-a-glance integrity summary chip were added, the
+  antenna tile now reads "Not sensed" on boards without a supervisor circuit
+  (instead of a misleading "Init"), and time-to-first-fix is framed as a startup
+  benchmark rather than a broken live gauge.
+* New receiver telemetry surfaced from the NEO-M9N: a broadband **Noise floor**
+  tile (MON-RF noisePerMS) to sit alongside the narrowband CW indicator, and an
+  on-chip **Odometer** (UBX NAV-ODO) tile showing hardware-filtered distance
+  since power-on plus lifetime total — accurate at low speed and immune to the
+  GPS jitter that can inflate a track-integrated distance.
 
 = 1.4.5 =
 * New shortcode option: `[satgps_dashboard hide_map="1"]` hides the map and

@@ -3,7 +3,7 @@
  * Plugin Name:       Satellite GPS Tracker
  * Plugin URI:        https://github.com/peterjmayhew/Satellite
  * Description:        Receives live GNSS telemetry from an ESP32 satellite receiver and presents it as an interactive map, sky plot, signal charts and trip statistics.
- * Version:           1.4.5
+ * Version:           1.4.6
  * Requires at least: 5.8
  * Requires PHP:      7.4
  * Update URI:        https://github.com/peterjmayhew/Satellite
@@ -18,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit; // No direct access.
 }
 
-define( 'SATGPS_VERSION', '1.4.5' );
+define( 'SATGPS_VERSION', '1.4.6' );
 define( 'SATGPS_DB_VERSION', '4' );
 define( 'SATGPS_FILE', __FILE__ );
 define( 'SATGPS_DIR', plugin_dir_path( __FILE__ ) );

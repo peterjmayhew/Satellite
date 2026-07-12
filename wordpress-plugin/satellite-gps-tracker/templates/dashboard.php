@@ -140,13 +140,21 @@ if ( ! defined( 'ABSPATH' ) ) {
 	<section class="satgps-card">
 		<h2><?php esc_html_e( 'Receiver health &amp; integrity', 'satgps' ); ?>
 			<button type="button" class="satgps-help" data-help="rf" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button>
+			<span class="satgps-tile-value satgps-health-chip is-muted" data-field="integrity" style="font-size:14px;font-weight:700;margin-left:auto"></span>
 		</h2>
+		<div class="satgps-health-key" aria-hidden="true">
+			<span><i style="background:var(--satgps-muted)"></i><?php esc_html_e( 'not measured', 'satgps' ); ?></span>
+			<span><i style="background:var(--satgps-ok)"></i><?php esc_html_e( 'healthy', 'satgps' ); ?></span>
+			<span><i style="background:var(--satgps-warn)"></i><?php esc_html_e( 'watch', 'satgps' ); ?></span>
+			<span><i style="background:var(--satgps-bad)"></i><?php esc_html_e( 'problem', 'satgps' ); ?></span>
+		</div>
 		<div class="satgps-tiles satgps-tiles-compact">
-			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Interference', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="jam">—</div><div class="satgps-tile-sub" data-field="jam_sub"></div></div>
-			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'AGC', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="agc">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'gain level', 'satgps' ); ?></div></div>
-			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Antenna', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="ant">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'supervisor', 'satgps' ); ?></div></div>
-			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Spoofing', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="spoof">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'detection', 'satgps' ); ?></div></div>
-			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Time to fix', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="ttff">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'cold/warm start', 'satgps' ); ?></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Interference', 'satgps' ); ?><button type="button" class="satgps-help satgps-help-sm" data-help="jam" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button></div><div class="satgps-tile-value is-muted" data-field="jam">—</div><div class="satgps-tile-sub" data-field="jam_sub"><?php esc_html_e( 'RF jamming monitor', 'satgps' ); ?></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'RF gain (AGC)', 'satgps' ); ?><button type="button" class="satgps-help satgps-help-sm" data-help="agc" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button></div><div class="satgps-tile-value is-muted" data-field="agc">—</div><div class="satgps-tile-sub" data-field="agc_sub"><?php esc_html_e( 'front-end gain', 'satgps' ); ?></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Noise floor', 'satgps' ); ?><button type="button" class="satgps-help satgps-help-sm" data-help="noise" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button></div><div class="satgps-tile-value is-muted" data-field="noise">—</div><div class="satgps-tile-sub" data-field="noise_sub"><?php esc_html_e( 'broadband level', 'satgps' ); ?></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Antenna feed', 'satgps' ); ?><button type="button" class="satgps-help satgps-help-sm" data-help="ant" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button></div><div class="satgps-tile-value is-muted" data-field="ant">—</div><div class="satgps-tile-sub" data-field="ant_sub"><?php esc_html_e( 'feed sense', 'satgps' ); ?></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Spoofing', 'satgps' ); ?><button type="button" class="satgps-help satgps-help-sm" data-help="spoof" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button></div><div class="satgps-tile-value is-muted" data-field="spoof">—</div><div class="satgps-tile-sub" data-field="spoof_sub"><?php esc_html_e( 'authenticity check', 'satgps' ); ?></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Time to first fix', 'satgps' ); ?><button type="button" class="satgps-help satgps-help-sm" data-help="ttff" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button></div><div class="satgps-tile-value is-muted" data-field="ttff">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'at last power-on', 'satgps' ); ?></div></div>
 		</div>
 	</section>
 
@@ -183,6 +191,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Moving time', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="moving_time">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'h:m:s', 'satgps' ); ?></div></div>
 			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Max altitude', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="max_alt">—</div><div class="satgps-tile-sub">m</div></div>
 			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Data points', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="points">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'fixes', 'satgps' ); ?></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Odometer', 'satgps' ); ?><button type="button" class="satgps-help satgps-help-sm" data-help="odo" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button></div><div class="satgps-tile-value" data-field="odo">—</div><div class="satgps-tile-sub" data-field="odo_sub"><?php esc_html_e( 'device · since power-on', 'satgps' ); ?></div></div>
 		</div>
 	</section>
 
