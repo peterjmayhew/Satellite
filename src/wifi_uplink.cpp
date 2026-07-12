@@ -139,9 +139,6 @@ void wifiUplinkInit() {
   WiFi.persistent(false);   // don't rewrite NVS on every begin() attempt
   WiFi.mode(WIFI_STA);
 
-  // Log the STA MAC once so it can be found (or checked against an access-control
-  // list) in the router's admin page without any guesswork.
-  Serial.printf("[uplink] STA MAC %s\n", WiFi.macAddress().c_str());
   // Print the exact reason on every disconnect (15=wrong password/handshake
   // timeout, 201=AP not found, 2/4=auth issues, 3/8=deauth/assoc-leave, etc.).
   WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
@@ -160,9 +157,6 @@ void wifiUplinkInit() {
   // LIGHT WiFi.disconnect(), never disconnect(true), plus the software watchdog.)
   WiFi.setAutoReconnect(false);
 
-  // NOTE: no WiFi.scanNetworks() here — the long-working build did not scan, and a
-  // scan immediately before begin() leaves the radio mid-scan/idle in a way that
-  // can make the following association fail. Connect straight away instead.
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.printf("[uplink] WiFi connecting to \"%s\"...\n", WIFI_SSID);
 }
@@ -179,9 +173,8 @@ void wifiUplinkLoop() {
     if (now - g_lastReconnect >= WIFI_RETRY_MS) {
       g_lastReconnect = now;
       Serial.printf("[uplink] WiFi status=%d, retrying...\n", (int)WiFi.status());
-      // Explicit credentials every time (robust regardless of persistent()/NVS),
-      // with a LIGHT disconnect() only — never disconnect(true), which does the
-      // blocking esp_wifi_stop()/start() radio teardown that could wedge the loop.
+      // Explicit credentials, LIGHT disconnect() only — never disconnect(true),
+      // which does the blocking radio teardown that could wedge the loop.
       WiFi.disconnect();
       WiFi.begin(WIFI_SSID, WIFI_PASS);
     }
