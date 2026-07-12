@@ -70,8 +70,11 @@ void bootScreenNew() {
   tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
   tft.println("[ OK ] TFT Display");
   
-  // SD Status - Check actual status
+  // SD Status. SD logging is intentionally disabled on this build
+  // (ENABLE_SD_LOG 0) to protect the power budget, so report that as a neutral
+  // "OFF" rather than a red "FAIL" — it is a deliberate choice, not a fault.
   tft.setCursor(40, 185);
+#if ENABLE_SD_LOG
   if (sdIsReady()) {
     tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
     tft.println("[ OK ] SD Card");
@@ -79,6 +82,10 @@ void bootScreenNew() {
     tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
     tft.println("[FAIL] SD Card");
   }
+#else
+  tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
+  tft.println("[ OFF] SD Card (disabled)");
+#endif
 
    // GPS Mode Check actual status
   tft.setCursor(40, 195);

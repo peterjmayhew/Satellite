@@ -121,7 +121,15 @@ void speedSample();                 // Screen4: timed speed-history sampling
 static void handleLogging();
 
 // --- Helper: redraw the current screen now ---
+// true  = repaint the whole screen incl. static labels (only on screen entry);
+// false = update just the dynamic value fields in place (the timed 5 s refresh),
+// so the display no longer blanks-and-repaints every cycle (no flicker).
+bool g_fullRedraw = true;
+
 static void redrawScreenNow() {
+  static int lastScreen = -1;
+  g_fullRedraw = (counter != lastScreen);   // full repaint only when the screen actually changed
+  lastScreen = counter;
   switch (counter) {
     case 0: updateDisplay1(); break;
     case 1: updateDisplay2(); break;
