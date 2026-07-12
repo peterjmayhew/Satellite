@@ -237,8 +237,13 @@ void setup() {
   GPSserial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX, GPS_TX);
   gpsParserInit(GPSserial);   // pure listen; the module streams NMEA by default
 
-  // SD first (before the boot screen reports its status)
+  // SD card — only when logging is enabled (see ENABLE_SD_LOG in config.h).
+  // Skipping sdInit when disabled also avoids setup() hanging in SD.begin() if
+  // the card is in a bad state, which would otherwise stall boot before the
+  // display initialises and leave the TFT blank white.
+#if ENABLE_SD_LOG
   sdInit(true);
+#endif
 
   // Display
   tft.begin();
