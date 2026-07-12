@@ -195,6 +195,11 @@ class SatGPS_REST {
 			'uart_tx_peak' => isset( $body['uart_tx_peak'] ) ? max( -1, min( 100, (int) $body['uart_tx_peak'] ) ) : -1,
 			'uart_rx_pct'  => isset( $body['uart_rx_pct'] ) ? max( -1, min( 100, (int) $body['uart_rx_pct'] ) ) : -1,
 			'uart_ovf'     => isset( $body['uart_ovf'] ) ? max( 0, min( 65535, (int) $body['uart_ovf'] ) ) : 0,
+			'geo_state'    => isset( $body['geo_state'] ) ? max( -1, min( 2, (int) $body['geo_state'] ) ) : -1,
+			'geo_status'   => ! empty( $body['geo_status'] ) ? 1 : 0,
+			'geo_lat'      => isset( $body['geo_lat'] ) ? max( -90.0, min( 90.0, (float) $body['geo_lat'] ) ) : 0.0,
+			'geo_lon'      => isset( $body['geo_lon'] ) ? max( -180.0, min( 180.0, (float) $body['geo_lon'] ) ) : 0.0,
+			'geo_radius_m' => isset( $body['geo_radius_m'] ) ? max( 0, min( 1000000, (int) $body['geo_radius_m'] ) ) : 0,
 			'uptime_ms'    => isset( $body['uptime_ms'] ) ? max( 0, (int) $body['uptime_ms'] ) : 0,
 			'sats_json'    => wp_json_encode( $this->sanitize_sats( isset( $body['sats'] ) ? $body['sats'] : array() ) ),
 		);
@@ -203,6 +208,10 @@ class SatGPS_REST {
 		if ( ! $id ) {
 			return new WP_Error( 'satgps_store_failed', 'Could not store telemetry.', array( 'status' => 500 ) );
 		}
+
+		// Live RF spectrum (UBX-MON-SPAN) is bulky and live-only, so it is NOT stored
+		// per-row; keep just the latest snapshot per device in an option.
+		$this->store_spectrum( $device, $body );
 
 		return rest_ensure_response(
 			array(
@@ -244,6 +253,47 @@ class SatGPS_REST {
 		return $out;
 	}
 
+	/**
+	 * Option name holding the latest RF spectrum for a device.
+	 *
+	 * @param string $device Sanitised device id.
+	 * @return string
+	 */
+	private function spectrum_option( $device ) {
+		return 'satgps_spectrum_' . $device;
+	}
+
+	/**
+	 * Store the latest RF-spectrum snapshot (UBX-MON-SPAN) for a device, overwriting
+	 * the previous one. Kept out of the fixes table because it is bulky and only the
+	 * live view matters. Ignored if the packet carries no valid spectrum.
+	 *
+	 * @param string $device Sanitised device id.
+	 * @param array  $body   Raw request body.
+	 */
+	private function store_spectrum( $device, $body ) {
+		if ( empty( $body['spectrum'] ) || ! is_scalar( $body['spectrum'] ) ) {
+			return;
+		}
+		$hex = strtolower( preg_replace( '/[^0-9a-fA-F]/', '', (string) $body['spectrum'] ) );
+		$hex = substr( $hex, 0, 1024 );          // <= 512 bins * 2 hex chars
+		if ( strlen( $hex ) < 2 ) {
+			return;
+		}
+		update_option(
+			$this->spectrum_option( $device ),
+			array(
+				'hex'       => $hex,
+				'center_hz' => isset( $body['spec_center_hz'] ) ? max( 0, (int) $body['spec_center_hz'] ) : 0,
+				'span_hz'   => isset( $body['spec_span_hz'] ) ? max( 0, (int) $body['spec_span_hz'] ) : 0,
+				'res_hz'    => isset( $body['spec_res_hz'] ) ? max( 0, (int) $body['spec_res_hz'] ) : 0,
+				'pga'       => isset( $body['spec_pga'] ) ? max( 0, min( 255, (int) $body['spec_pga'] ) ) : 0,
+				't'         => time(),
+			),
+			false // do not autoload.
+		);
+	}
+
 	/* ------------------------------------------------------------------ */
 	/*  Reads                                                              */
 	/* ------------------------------------------------------------------ */
@@ -270,8 +320,7 @@ class SatGPS_REST {
 
 		$age = max( 0, time() - (int) strtotime( $row['received_at'] . ' UTC' ) );
 
-		return rest_ensure_response(
-			array(
+		$out = array(
 				'found'        => true,
 				'device'       => $row['device'],
 				'ts'           => $row['ts'],
@@ -318,11 +367,28 @@ class SatGPS_REST {
 				'uart_tx_peak' => isset( $row['uart_tx_peak'] ) ? (int) $row['uart_tx_peak'] : -1,
 				'uart_rx_pct'  => isset( $row['uart_rx_pct'] ) ? (int) $row['uart_rx_pct'] : -1,
 				'uart_ovf'     => isset( $row['uart_ovf'] ) ? (int) $row['uart_ovf'] : 0,
+				'geo_state'    => isset( $row['geo_state'] ) ? (int) $row['geo_state'] : -1,
+				'geo_status'   => isset( $row['geo_status'] ) ? (int) $row['geo_status'] : 0,
+				'geo_lat'      => isset( $row['geo_lat'] ) ? (float) $row['geo_lat'] : 0.0,
+				'geo_lon'      => isset( $row['geo_lon'] ) ? (float) $row['geo_lon'] : 0.0,
+				'geo_radius_m' => isset( $row['geo_radius_m'] ) ? (int) $row['geo_radius_m'] : 0,
 				'sats_used'    => (int) $row['sats_used'],
 				'sats_in_view' => (int) $row['sats_in_view'],
 				'sats'         => $sats,
-			)
-		);
+			);
+
+		// Merge the latest RF spectrum snapshot (stored out-of-row; see store_spectrum()).
+		$spec = get_option( $this->spectrum_option( $row['device'] ) );
+		if ( is_array( $spec ) && ! empty( $spec['hex'] ) ) {
+			$out['spectrum']       = (string) $spec['hex'];
+			$out['spec_center_hz'] = isset( $spec['center_hz'] ) ? (int) $spec['center_hz'] : 0;
+			$out['spec_span_hz']   = isset( $spec['span_hz'] ) ? (int) $spec['span_hz'] : 0;
+			$out['spec_res_hz']    = isset( $spec['res_hz'] ) ? (int) $spec['res_hz'] : 0;
+			$out['spec_pga']       = isset( $spec['pga'] ) ? (int) $spec['pga'] : 0;
+			$out['spec_age']       = isset( $spec['t'] ) ? max( 0, time() - (int) $spec['t'] ) : null;
+		}
+
+		return rest_ensure_response( $out );
 	}
 
 	/**

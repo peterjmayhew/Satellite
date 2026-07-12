@@ -4,7 +4,7 @@ Tags: gps, gnss, tracker, esp32, map
 Requires at least: 5.8
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.4.9
+Stable tag: 1.4.10
 License: GPLv2 or later
 
 Receive live GNSS telemetry from an ESP32 satellite receiver and present it as an
@@ -60,6 +60,20 @@ Ingest requires the secret API key in the `X-API-Key` header (constant-time
 compared). Read endpoints are admin-only unless you enable "Public dashboard".
 
 == Changelog ==
+
+= 1.4.10 =
+* New **Live RF spectrum** card: a real-time spectrum-analyser plot of the L1
+  band straight from the receiver (UBX-MON-SPAN), showing the noise floor and
+  any interference spikes across the ~1575 MHz band, with the GPS L1 centre
+  marked. The spectrum is kept as a live snapshot (not stored per fix, so it
+  adds no history bloat).
+* New **Geofence** feature: the device sets a circular geofence at its own
+  power-on location (UBX-CFG-GEOFENCE) and reports whether it is inside or
+  outside (UBX-NAV-GEOFENCE). The dashboard draws the zone on the map and shows
+  an Inside/Outside status tile.
+* Ingest/latest gained `geo_state`, `geo_status`, `geo_lat`, `geo_lon`,
+  `geo_radius_m` (schema migrated on upgrade) and the spectrum snapshot
+  (`spectrum` + `spec_*`, stored per device out-of-row). Requires firmware v1.23+.
 
 = 1.4.9 =
 * New **UART link load** gauge in the receiver health section, from UBX

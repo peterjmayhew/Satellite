@@ -19,6 +19,11 @@
     extern int sbasSys, sbasPrn, sbasCnt;                 // NAV-SBAS augmentation status
     extern String rxModule, rxFw, rxProto, rxGnss;        // MON-VER receiver identity
     extern int uartTxPct, uartTxPeak, uartRxPct, uartOvf; // MON-COMMS UART link load
+    extern uint8_t spectrum[256];                         // MON-SPAN power bins
+    extern bool specValid;
+    extern uint32_t specSpanHz, specResHz, specCenterHz;
+    extern int specPga;
+    extern int geoState, geoStatus;                       // NAV-GEOFENCE status
 
     // Link diagnostics (defined in main.cpp)
     extern uint32_t diagBytesRx, diagNmeaCount, diagUbxSync, diagUbxFrames, diagUbxBadCk, diagCfgSends, diagLastByteMs;
@@ -130,6 +135,14 @@
     // Enable MON-COMMS (0A 36) every ~5 s — UART port buffer load / overruns
     // (the "UART link load" gauge). Slow-changing, so a low rate is plenty.
     cfgMsgRate(gps, 0x0A, 0x36, 25);
+
+    // Enable MON-SPAN (0A 31) every ~5 s — live RF spectrum (256 bins). It is a
+    // ~276-byte frame, so keep the rate low to stay within the 38400-baud budget.
+    cfgMsgRate(gps, 0x0A, 0x31, 25);
+
+    // Enable NAV-GEOFENCE (01 39) every epoch — cheap 10-byte status. Emits
+    // meaningfully only once a fence is configured (done at first fix).
+    cfgMsgRate(gps, 0x01, 0x39, 1);
 
     // Ensure SBAS is enabled (EGNOS over Europe) — usually default-on; make it explicit.
     // CFG-SIGNAL-SBAS_ENA = 0x10310020. Non-fatal if the module ignores it.
@@ -319,6 +332,51 @@
     }
     }
 
+    // MON-SPAN (0A 31) — RF spectrum. Header 4 B (version, numRfBlocks, reserved[2]);
+    // then numRfBlocks * 272-byte blocks from offset 4: spectrum[256], span(U4),
+    // res(U4), center(U4), pga(U1), reserved[3]. We keep block 0 (M9N single L1 path).
+    static void handleMonSpan(const uint8_t *p, uint16_t n) {
+    if (n < 4) return;
+    uint8_t numRfBlocks = p[1];
+    if (numRfBlocks < 1) return;
+    if (4 + 272 > n) return;                    // need at least one full block
+    const uint8_t *b = p + 4;                   // block 0
+    memcpy(spectrum, b, 256);
+    specSpanHz   = u32(b + 256);
+    specResHz    = u32(b + 260);
+    specCenterHz = u32(b + 264);
+    specPga      = b[268];
+    if (!specValid) {
+        Serial.printf("[gps] MON-SPAN blocks=%u center=%.2fMHz span=%.1fMHz res=%lukHz pga=%ddB\n",
+                      numRfBlocks, specCenterHz / 1e6, specSpanHz / 1e6,
+                      (unsigned long)(specResHz / 1000), specPga);
+    }
+    specValid = true;
+    }
+
+    // NAV-GEOFENCE (01 39) — geofence status. Header 8 B: iTOW(U4), version, status,
+    // numFences, combState; then numFences * 2-byte {state,id}. combState/state:
+    // 0 unknown, 1 inside, 2 outside. Only trust it when status==1 (active).
+    static void handleNavGeofence(const uint8_t *p, uint16_t n) {
+    if (n < 8) return;
+    int prevState = geoState, prevStatus = geoStatus;
+    geoStatus = p[5];                           // 0 = not active, 1 = active
+    geoState  = (geoStatus == 1) ? p[7] : 0;    // combined inside/outside, gated on active
+    if (geoState != prevState || geoStatus != prevStatus) {
+        Serial.printf("[gps] NAV-GEOFENCE status=%d state=%d (%s)\n",
+                      geoStatus, geoState,
+                      geoState == 1 ? "inside" : (geoState == 2 ? "outside" : "unknown"));
+    }
+    }
+
+    // ACK-ACK (05 01) / ACK-NAK (05 00) — log the outcome of config messages
+    // (notably the deprecated CFG-GEOFENCE, to confirm it was accepted).
+    static void handleAck(uint8_t id, const uint8_t *p, uint16_t n) {
+    if (n < 2) return;
+    Serial.printf("[gps] %s for cls=0x%02X id=0x%02X\n",
+                  id == 0x01 ? "ACK" : "NAK", p[0], p[1]);
+    }
+
     // MON-VER (0A 04) — receiver identity. sw(30) + hw(10) + N * 30-byte extension
     // strings ("MOD=NEO-M9N", "PROTVER=32.01", "FWVER=SPG 4.04", the GNSS list).
     static void handleMonVer(const uint8_t *p, uint16_t n) {
@@ -417,9 +475,12 @@
     else if (cls == 0x01 && id == 0x35) { diagNavSat++;    handleNavSat(p, n); }
     else if (cls == 0x01 && id == 0x09) {                  handleNavOdo(p, n); }
     else if (cls == 0x01 && id == 0x32) {                  handleNavSbas(p, n); }
+    else if (cls == 0x01 && id == 0x39) {                  handleNavGeofence(p, n); }
     else if (cls == 0x0A && id == 0x38) { diagMonRf++;     handleMonRf(p, n); }
     else if (cls == 0x0A && id == 0x36) {                  handleMonComms(p, n); }
+    else if (cls == 0x0A && id == 0x31) {                  handleMonSpan(p, n); }
     else if (cls == 0x0A && id == 0x04) {                  handleMonVer(p, n); }
+    else if (cls == 0x05) {                                handleAck(id, p, n); }
     }
 
     // --------------- Public API ---------------
@@ -490,6 +551,24 @@
         configureForUbx(gps);
         g_lastCfgMs = millis();
     }
+    }
+
+    // Configure one circular geofence via legacy UBX-CFG-GEOFENCE (0x06 0x69):
+    // 8-byte header + one 12-byte fence block {lat(I4,1e-7deg), lon(I4,1e-7deg),
+    // radius(U4, CENTIMETRES)}. Watch serial for ACK-ACK (accepted) vs NAK.
+    void gpsConfigureGeofence(HardwareSerial &gps, double lat, double lon, uint32_t radiusM) {
+    int32_t  latE7 = (int32_t)lround(lat * 1e7);
+    int32_t  lonE7 = (int32_t)lround(lon * 1e7);
+    uint32_t radCm = radiusM * 100;             // radius field is in 1e-2 m (cm)
+    uint8_t pl[20];
+    memset(pl, 0, sizeof(pl));
+    pl[1] = 0x01;                               // numFences = 1 (version, confLvl, pio = 0)
+    memcpy(pl + 8,  &latE7, 4);
+    memcpy(pl + 12, &lonE7, 4);
+    memcpy(pl + 16, &radCm, 4);
+    sendUbx(gps, 0x06, 0x69, pl, 20);
+    Serial.printf("[gps] CFG-GEOFENCE set lat=%.6f lon=%.6f r=%um (%ucm)\n",
+                  lat, lon, (unsigned)radiusM, (unsigned)radCm);
     }
 
 // ... rest of file

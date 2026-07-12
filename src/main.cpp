@@ -30,6 +30,9 @@
 #define GPS_TX 17
 #define GPS_BAUD 38400
 
+// Geofence radius (m) for the zone auto-configured at the device's power-on location.
+#define GEOFENCE_RADIUS_M 150
+
 // --- Globals ---
 HardwareSerial GPSserial(1);
 TFT_eSPI tft = TFT_eSPI();
@@ -89,6 +92,19 @@ int uartTxPct = -1;      // tx buffer usage %, -1 = not reported yet
 int uartTxPeak = -1;     // peak tx buffer usage %
 int uartRxPct = -1;      // rx buffer usage %
 int uartOvf = 0;         // overrun errors (bytes/timeslots dropped)
+
+// Live RF spectrum (UBX-MON-SPAN): 256 relative-dB power bins across the L1 band.
+uint8_t spectrum[256] = {0};
+bool specValid = false;             // true once a MON-SPAN frame has been parsed
+uint32_t specSpanHz = 0, specResHz = 0, specCenterHz = 0;
+int specPga = 0;                    // programmable gain (dB)
+
+// Geofence (UBX-CFG-GEOFENCE + NAV-GEOFENCE): a zone set at the power-on location.
+int geoState = -1;                  // -1 n/a, 0 unknown, 1 inside, 2 outside
+int geoStatus = 0;                  // 0 = geofencing not active, 1 = active
+float geoLat = 0.0f, geoLon = 0.0f; // configured fence centre
+int geoRadiusM = 0;                 // configured radius (m); 0 = not configured yet
+bool geoConfigured = false;
 
 // Horizontal error ellipse (from UBX NAV-COV position covariance)
 float errMajorM = 0.0;   // semi-major axis 1-sigma std dev (m)
@@ -344,7 +360,15 @@ void loop() {
   handleSerialDiag();
   handleNavigation();
   gpsParserProcess(GPSserial);
-#if !USE_UBX
+#if USE_UBX
+  // Once we have a solid 3D fix, set a geofence at this power-on location (home
+  // base). Done once; NAV-GEOFENCE then reports inside/outside from here on.
+  if (!geoConfigured && fixType >= 3 && latitude != 0.0f && longitude != 0.0f) {
+    gpsConfigureGeofence(GPSserial, latitude, longitude, GEOFENCE_RADIUS_M);
+    geoLat = latitude; geoLon = longitude; geoRadiusM = GEOFENCE_RADIUS_M;
+    geoConfigured = true;
+  }
+#else
   handleGpsRecovery();   // un-stick the module if it goes silent
 #endif
   handleLogging();

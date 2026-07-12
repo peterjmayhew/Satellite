@@ -2,6 +2,9 @@
 #include <Arduino.h>
 void gpsParserInit(HardwareSerial &gps);
 void gpsParserProcess(HardwareSerial &gps);
+// Configure a single circular geofence (UBX-CFG-GEOFENCE) at lat/lon with the
+// given radius in metres. UBX mode only.
+void gpsConfigureGeofence(HardwareSerial &gps, double lat, double lon, uint32_t radiusM);
 
 void gpsUpdateLine(const String& nmea);
 const String& gpsGetLastLine();

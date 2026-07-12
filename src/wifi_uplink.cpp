@@ -24,6 +24,12 @@ extern float errMajorM, errMinorM, errOrientDeg;
 extern int sbasSys, sbasPrn, sbasCnt;
 extern String rxModule, rxFw, rxProto, rxGnss;
 extern int uartTxPct, uartTxPeak, uartRxPct, uartOvf;
+extern uint8_t spectrum[256];
+extern bool specValid;
+extern uint32_t specSpanHz, specResHz, specCenterHz;
+extern int specPga;
+extern int geoState, geoStatus, geoRadiusM;
+extern float geoLat, geoLon;
 extern String timeUTC, dateUTC;
 
 static bool g_enabled = false;
@@ -43,7 +49,7 @@ static String isoTimestamp() {
 
 static String buildJson() {
   String s;
-  s.reserve(2048);
+  s.reserve(4096);
   s += "{";
   s += "\"device\":\""; s += SATGPS_DEVICE_ID; s += "\",";
   s += "\"fw\":\"";     s += VERSION;          s += "\",";
@@ -85,6 +91,29 @@ static String buildJson() {
   s += "\"uart_tx_peak\":"; s += uartTxPeak;            s += ",";
   s += "\"uart_rx_pct\":";  s += uartRxPct;             s += ",";
   s += "\"uart_ovf\":";     s += uartOvf;               s += ",";
+  // Geofence status (UBX NAV-GEOFENCE + the fence we configured)
+  s += "\"geo_state\":";    s += geoState;              s += ",";
+  s += "\"geo_status\":";   s += geoStatus;             s += ",";
+  s += "\"geo_lat\":";      s += String(geoLat, 6);     s += ",";
+  s += "\"geo_lon\":";      s += String(geoLon, 6);     s += ",";
+  s += "\"geo_radius_m\":"; s += geoRadiusM;            s += ",";
+  // Live RF spectrum (UBX MON-SPAN): 256 power bins as hex + band metadata
+  if (specValid) {
+    s += "\"spec_center_hz\":"; s += String(specCenterHz); s += ",";
+    s += "\"spec_span_hz\":";   s += String(specSpanHz);   s += ",";
+    s += "\"spec_res_hz\":";    s += String(specResHz);    s += ",";
+    s += "\"spec_pga\":";       s += specPga;              s += ",";
+    s += "\"spectrum\":\"";
+    static const char hexd[] = "0123456789abcdef";
+    char hx[513];
+    for (int i = 0; i < 256; i++) {
+      hx[i * 2]     = hexd[spectrum[i] >> 4];
+      hx[i * 2 + 1] = hexd[spectrum[i] & 0x0F];
+    }
+    hx[512] = 0;
+    s += hx;
+    s += "\",";
+  }
   // Receiver health / integrity (UBX MON-RF + NAV-STATUS)
   s += "\"jam_state\":";    s += rfJamState;            s += ",";
   s += "\"jam_ind\":";      s += rfJamInd;              s += ",";

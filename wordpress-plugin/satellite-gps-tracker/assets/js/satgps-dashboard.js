@@ -33,6 +33,65 @@
 		return { GPS: 'GPS', GLO: 'GLONASS', GAL: 'Galileo', BDS: 'BeiDou',
 			QZSS: 'QZSS', SBAS: 'SBAS', IMES: 'IMES', NAVIC: 'NavIC', IRNSS: 'NavIC' }[tok] || tok;
 	}
+	// Read a --satgps-* CSS custom property (defined on .satgps-app), with a fallback.
+	function cssVar(name, fallback) {
+		var root = document.querySelector('.satgps-app') || document.documentElement;
+		var v = getComputedStyle(root).getPropertyValue(name);
+		return v && v.trim() ? v.trim() : fallback;
+	}
+	// #rrggbb -> rgba(...,a). Returns the input unchanged if not a 6-digit hex.
+	function hexToRgba(c, a) {
+		c = (c || '').trim();
+		if (c.charAt(0) === '#' && c.length >= 7) {
+			return 'rgba(' + parseInt(c.substr(1, 2), 16) + ',' + parseInt(c.substr(3, 2), 16) +
+				',' + parseInt(c.substr(5, 2), 16) + ',' + a + ')';
+		}
+		return c;
+	}
+	// Decode a hex string ("0a1f...") into an array of 0-255 byte values.
+	function hexToBins(hex) {
+		if (!hex) { return []; }
+		var n = hex.length >> 1, bins = new Array(n);
+		for (var i = 0; i < n; i++) { bins[i] = parseInt(hex.substr(i * 2, 2), 16) || 0; }
+		return bins;
+	}
+	// Draw a spectrum-analyser plot (power bins vs frequency) into a canvas.
+	function drawSpectrum(canvas, bins, centerHz, spanHz) {
+		if (!canvas || !canvas.getContext || bins.length < 2) { return; }
+		var ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
+		var accent = '#4c8bf5', grid = cssVar('--satgps-border', '#2a3446'),
+			text = cssVar('--satgps-muted', '#97a3b6'), okc = cssVar('--satgps-ok', '#22c55e');
+		ctx.clearRect(0, 0, W, H);
+		var padL = 8, padR = 8, padT = 12, padB = 22, pW = W - padL - padR, pH = H - padT - padB, n = bins.length;
+		ctx.strokeStyle = grid; ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
+		for (var g = 0; g <= 4; g++) { var gy = padT + pH * g / 4; ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(W - padR, gy); ctx.stroke(); }
+		ctx.globalAlpha = 1;
+		var xAt = function (i) { return padL + pW * i / (n - 1); };
+		var yAt = function (v) { return padT + pH * (1 - Math.max(0, Math.min(255, v)) / 255); };
+		ctx.beginPath(); ctx.moveTo(padL, padT + pH);
+		for (var i = 0; i < n; i++) { ctx.lineTo(xAt(i), yAt(bins[i])); }
+		ctx.lineTo(padL + pW, padT + pH); ctx.closePath();
+		var grad = ctx.createLinearGradient(0, padT, 0, padT + pH);
+		grad.addColorStop(0, hexToRgba(accent, 0.55)); grad.addColorStop(1, hexToRgba(accent, 0.04));
+		ctx.fillStyle = grad; ctx.fill();
+		ctx.beginPath();
+		for (var j = 0; j < n; j++) { var x = xAt(j), y = yAt(bins[j]); if (j === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); } }
+		ctx.strokeStyle = accent; ctx.lineWidth = 1.5; ctx.stroke();
+		if (centerHz > 0 && spanHz > 0) {
+			var f0 = (centerHz - spanHz / 2) / 1e6, f1 = (centerHz + spanHz / 2) / 1e6;
+			ctx.fillStyle = text; ctx.font = '11px system-ui, -apple-system, sans-serif'; ctx.textBaseline = 'top';
+			ctx.textAlign = 'left'; ctx.fillText(f0.toFixed(1), padL, padT + pH + 5);
+			ctx.textAlign = 'right'; ctx.fillText(f1.toFixed(1) + ' MHz', W - padR, padT + pH + 5);
+			var l1 = 1575.42; // GPS L1
+			if (l1 >= f0 && l1 <= f1) {
+				var lx = padL + pW * (l1 - f0) / (f1 - f0);
+				ctx.strokeStyle = okc; ctx.setLineDash([4, 3]); ctx.globalAlpha = 0.85;
+				ctx.beginPath(); ctx.moveTo(lx, padT); ctx.lineTo(lx, padT + pH); ctx.stroke();
+				ctx.setLineDash([]); ctx.globalAlpha = 1;
+				ctx.fillStyle = okc; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText('L1', lx, padT);
+			}
+		}
+	}
 
 	function api(path, params) {
 		var url = CFG.restUrl + path;
@@ -202,6 +261,32 @@
 			'<br>' + spd(latest.speed_kmh).toFixed(1) + ' ' + spdUnit +
 			(latest.acc_h_m > 0 ? '<br>±' + latest.acc_h_m.toFixed(1) + ' m' : '')
 		);
+	}
+
+	// Geofence (UBX-NAV-GEOFENCE): draw the configured zone on the map and show an
+	// inside/outside badge. The device sets the fence at its own power-on location;
+	// geo_state 1 = inside, 2 = outside, 0/-1 = unknown/not available.
+	function updateGeofence(latest) {
+		var badge = field('geo_badge');
+		if (state.geoCircle && state.map) { state.map.removeLayer(state.geoCircle); state.geoCircle = null; }
+		var hasFence = latest.geo_radius_m > 0 && (latest.geo_lat || latest.geo_lon);
+		if (!hasFence) { if (badge) { badge.hidden = true; } return; }
+		var inside = latest.geo_state === 1, outside = latest.geo_state === 2;
+		var color = inside ? cssVar('--satgps-ok', '#22c55e')
+			: (outside ? cssVar('--satgps-bad', '#ef4444') : cssVar('--satgps-muted', '#97a3b6'));
+		if (state.map) {
+			state.geoCircle = L.circle([latest.geo_lat, latest.geo_lon], {
+				radius: latest.geo_radius_m, color: color, weight: 2, opacity: 0.9,
+				fillColor: color, fillOpacity: inside ? 0.08 : (outside ? 0.14 : 0.05), dashArray: '6 5'
+			}).addTo(state.map);
+			state.geoCircle.bindPopup('Geofence · ' + latest.geo_radius_m + ' m radius<br>' +
+				(inside ? 'Device inside zone' : (outside ? 'Device outside zone' : 'State unknown')));
+		}
+		if (badge) {
+			badge.hidden = false;
+			badge.textContent = inside ? '● Inside zone' : (outside ? '● Outside zone' : '○ Geofence');
+			badge.className = 'satgps-geo-badge' + (inside ? ' is-inside' : (outside ? ' is-outside' : ''));
+		}
 	}
 
 	// ---- charts -----------------------------------------------------------
@@ -560,6 +645,22 @@
 			setHealth('sbas_status', '—', 'muted');
 			setField('sbas_sub', 'differential corrections');
 		}
+
+		// Live RF spectrum (UBX-MON-SPAN): hex-encoded power bins + band metadata,
+		// delivered as a live snapshot. Hide the whole card until data arrives.
+		var specCard = document.querySelector('[data-card="spectrum"]');
+		if (latest.spectrum) {
+			var bins = hexToBins(latest.spectrum);
+			if (specCard) { specCard.hidden = false; }
+			drawSpectrum(document.getElementById('satgps-spectrum'), bins,
+				latest.spec_center_hz || 0, latest.spec_span_hz || 0);
+			var cMHz = (latest.spec_center_hz || 0) / 1e6, sMHz = (latest.spec_span_hz || 0) / 1e6;
+			setField('spec_meta', 'Centre ' + cMHz.toFixed(2) + ' MHz · span ' + sMHz.toFixed(1) +
+				' MHz · ' + bins.length + ' bins · PGA ' + (latest.spec_pga || 0) + ' dB' +
+				(latest.spec_age != null ? ' · ' + latest.spec_age + ' s ago' : ''));
+		} else if (specCard) {
+			specCard.hidden = true;
+		}
 	}
 
 	// ---- data flow --------------------------------------------------------
@@ -575,6 +676,7 @@
 			updateTiles(latest);
 			if (latest.found) {
 				updateMarker(latest);
+				updateGeofence(latest);
 				SatGPSSkyplot.draw(document.getElementById('satgps-skyplot'), latest.sats);
 				updateSnrChart(latest.sats);
 				updateConstellation(latest.sats);
@@ -687,7 +789,8 @@
 		odo: '<h3>Odometer</h3><p>The receiver\'s own trip counter: cumulative ground distance travelled since it last powered up, computed on-chip. Because it is hardware-filtered it stays accurate at walking pace and shrugs off the GPS jitter that can inflate a distance worked out by joining up track points. The "total" figure is the module\'s lifetime distance across all trips.</p>',
 		receiver: '<h3>Receiver</h3><p>The GNSS module\'s own identity, read straight off the chip at boot with the u-blox <i>MON-VER</i> message. <b>Module</b> is the silicon (a u-blox NEO-M9N here); <b>Firmware</b> is u-blox\'s on-chip software (their "SPG" standard-precision GNSS build) — separate from the tracker\'s own sketch version; <b>Protocol</b> is the UBX binary version the module speaks; and <b>Constellations</b> lists which satellite systems it is set to use.</p>',
 		sbas: '<h3>SBAS augmentation</h3><p>SBAS (Satellite-Based Augmentation System) is a free correction service broadcast from geostationary satellites — <b>EGNOS</b> over Europe, WAAS over North America, MSAS over Japan, GAGAN over India. It sends small corrections that sharpen the fix and flag any satellite it judges unsafe to use. This tile (from UBX <i>NAV-SBAS</i>) names the system in use, the <b>GEO</b> satellite\'s PRN number the receiver is listening to, and how many satellites are currently being corrected. "Not in use" simply means no SBAS satellite is being tracked right now — often just a low southern-sky view.</p>',
-		uart: '<h3>UART link load</h3><p>The GNSS module streams its data to the ESP32 over a serial (UART) link. This gauge, from UBX <i>MON-COMMS</i>, shows how full the receiver\'s transmit buffer for that link is — essentially the backlog of data waiting to be sent. Low and steady is healthy; a persistently <b>high</b> reading (amber) means the host isn\'t reading the stream fast enough, and an <b>overrun</b> (red) means the buffer filled completely and bytes were dropped. The "peak" figure is the highest level seen in the last monitoring window. It is a plumbing check on the link itself, separate from satellite signal quality.</p>'
+		uart: '<h3>UART link load</h3><p>The GNSS module streams its data to the ESP32 over a serial (UART) link. This gauge, from UBX <i>MON-COMMS</i>, shows how full the receiver\'s transmit buffer for that link is — essentially the backlog of data waiting to be sent. Low and steady is healthy; a persistently <b>high</b> reading (amber) means the host isn\'t reading the stream fast enough, and an <b>overrun</b> (red) means the buffer filled completely and bytes were dropped. The "peak" figure is the highest level seen in the last monitoring window. It is a plumbing check on the link itself, separate from satellite signal quality.</p>',
+		spectrum: '<h3>Live RF spectrum</h3><p>A real spectrum-analyser sweep from inside the receiver (UBX <i>MON-SPAN</i>): the strength of every radio frequency across the band around <b>GPS L1</b> (~1575 MHz, marked). The satellite signals themselves are far too weak to see — what you are looking at is the noise floor. A flat, even floor is healthy; a sharp <b>spike</b> or a raised hump is interference (a jammer, a nearby electronic device, or an out-of-band transmitter) that can degrade the fix. The vertical scale is relative dB (comparative, not absolute power), and "PGA" is the internal amplifier gain applied before this sweep.</p>'
 	};
 	function initHelp() {
 		var modal = $('#satgps-help-modal'), content = $('#satgps-help-content');

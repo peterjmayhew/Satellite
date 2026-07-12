@@ -108,6 +108,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 				<div id="satgps-map" class="satgps-map"></div>
 				<div class="satgps-coords">
 					<span data-field="latlon">—</span>
+					<span class="satgps-geo-badge" data-field="geo_badge" hidden></span>
 					<span class="satgps-muted" data-field="last_ts"></span>
 				</div>
 			<?php endif; ?>
@@ -171,6 +172,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Constellations', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="rx_gnss" style="font-size:15px">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'enabled GNSS', 'satgps' ); ?></div></div>
 			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'SBAS augmentation', 'satgps' ); ?><button type="button" class="satgps-help satgps-help-sm" data-help="sbas" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button></div><div class="satgps-tile-value is-muted" data-field="sbas_status">—</div><div class="satgps-tile-sub" data-field="sbas_sub"><?php esc_html_e( 'differential corrections', 'satgps' ); ?></div></div>
 		</div>
+	</section>
+
+	<!-- Live RF spectrum (UBX-MON-SPAN) -->
+	<section class="satgps-card" data-card="spectrum" hidden>
+		<h2><?php esc_html_e( 'Live RF spectrum', 'satgps' ); ?>
+			<button type="button" class="satgps-help" data-help="spectrum" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button>
+		</h2>
+		<div class="satgps-spectrum-wrap"><canvas id="satgps-spectrum" class="satgps-spectrum" width="900" height="240"></canvas></div>
+		<div class="satgps-spectrum-meta satgps-muted" data-field="spec_meta"></div>
 	</section>
 
 	<!-- History charts -->
