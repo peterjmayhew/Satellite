@@ -24,6 +24,15 @@
 			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
 		});
 	}
+	// UBX NAV-SBAS "sys" field -> human name. -1/unknown -> '' (caller decides).
+	function sbasSysName(sys) {
+		return { '0': 'WAAS', '1': 'EGNOS', '2': 'MSAS', '3': 'GAGAN', '16': 'GPS' }[String(sys)] || '';
+	}
+	// UBX MON-VER GNSS token -> full constellation name.
+	function gnssName(tok) {
+		return { GPS: 'GPS', GLO: 'GLONASS', GAL: 'Galileo', BDS: 'BeiDou',
+			QZSS: 'QZSS', SBAS: 'SBAS', IMES: 'IMES', NAVIC: 'NavIC', IRNSS: 'NavIC' }[tok] || tok;
+	}
 
 	function api(path, params) {
 		var url = CFG.restUrl + path;
@@ -371,7 +380,8 @@
 		}
 		if (!latest.found) { return; }
 		var ft = { 2: '2D fix', 3: '3D fix', 5: 'time only' }[latest.fix_type] || 'fix';
-		setField('fix_sub', latest.fix ? (ft + (latest.sbas ? ' · SBAS' : '')) : 'searching…');
+		var fixSbas = latest.sbas ? (' · ' + (sbasSysName(latest.sbas_sys) || 'SBAS')) : '';
+		setField('fix_sub', latest.fix ? (ft + fixSbas) : 'searching…');
 		setField('sats_used', latest.sats_used);
 		setField('sats_in_view', latest.sats_in_view);
 		setField('speed', spd(latest.speed_kmh).toFixed(1));
@@ -480,6 +490,40 @@
 				? ' · ' + dist(latest.odo_total_m / 1000).toFixed(0) + ' ' + distUnit + ' total'
 				: '';
 			setField('odo_sub', distUnit + ' · since power-on' + totalStr);
+		}
+
+		// Receiver identity (UBX MON-VER, read off the chip once at boot). Static,
+		// so it stays blank in plain-NMEA mode until the device reports it.
+		setField('rx_module', latest.rx_module || '—');
+		setField('rx_fw', latest.rx_fw || '—');
+		setField('rx_proto', latest.rx_proto || '—');
+		if (latest.rx_gnss) {
+			setField('rx_gnss', String(latest.rx_gnss).split(';')
+				.map(function (g) { return gnssName(g.trim()); })
+				.filter(Boolean).join(' · '));
+		} else {
+			setField('rx_gnss', '—');
+		}
+
+		// SBAS augmentation status (UBX NAV-SBAS): the real system in use (EGNOS over
+		// the UK), the GEO satellite PRN, and how many SVs carry corrections — not
+		// just the on/off flag from the fix.
+		var sysName = sbasSysName(latest.sbas_sys);
+		if (latest.sbas && (sysName || latest.sbas_prn > 0)) {
+			setHealth('sbas_status', sysName || 'Active', 'ok');
+			var prnStr = latest.sbas_prn > 0 ? 'GEO ' + latest.sbas_prn : 'active';
+			var cnt = latest.sbas_cnt || 0;
+			var cntStr = cnt > 0 ? ' · ' + cnt + ' sat' + (cnt === 1 ? '' : 's') : '';
+			setField('sbas_sub', prnStr + cntStr);
+		} else if (latest.sbas) {
+			setHealth('sbas_status', 'Active', 'ok');
+			setField('sbas_sub', 'differential corrections');
+		} else if (latest.fix_type != null && latest.rx_module) {
+			setHealth('sbas_status', 'Not in use', 'muted');
+			setField('sbas_sub', sysName ? sysName + ' available' : 'no corrections yet');
+		} else {
+			setHealth('sbas_status', '—', 'muted');
+			setField('sbas_sub', 'differential corrections');
 		}
 	}
 
@@ -605,7 +649,9 @@
 		ant: '<h3>Antenna feed</h3><p>On boards wired for it, this catches a broken or shorted antenna cable. Doing so needs a small supervisor circuit that senses the current flowing up the coax to a <i>powered</i> (active) antenna. This tracker doesn\'t include that circuit, so the receiver can\'t tell and reports <b>Not sensed</b> — which is why it stays grey rather than green. That is expected here, not a fault.</p>',
 		spoof: '<h3>Spoofing</h3><p>Where jamming shouts over the satellites, spoofing impersonates them — broadcasting counterfeit signals to trick the receiver about where or when it is. The M9N runs simple consistency checks and reports <b>None</b>, <b>Suspected</b> or <b>Detected</b>. It is a lightweight check, so a green "None" is good news but not absolute proof.</p>',
 		ttff: '<h3>Time to first fix</h3><p>A stopwatch on the receiver\'s last boot: the time from power-on to its first position fix. Starting cold — no memory of the time, almanac or where it was — takes about half a minute; a warm restart is only seconds. A long time usually just means it booted somewhere with a poor view of the sky. It stays fixed after that first fix, so treat it as a startup score, not a live gauge.</p>',
-		odo: '<h3>Odometer</h3><p>The receiver\'s own trip counter: cumulative ground distance travelled since it last powered up, computed on-chip. Because it is hardware-filtered it stays accurate at walking pace and shrugs off the GPS jitter that can inflate a distance worked out by joining up track points. The "total" figure is the module\'s lifetime distance across all trips.</p>'
+		odo: '<h3>Odometer</h3><p>The receiver\'s own trip counter: cumulative ground distance travelled since it last powered up, computed on-chip. Because it is hardware-filtered it stays accurate at walking pace and shrugs off the GPS jitter that can inflate a distance worked out by joining up track points. The "total" figure is the module\'s lifetime distance across all trips.</p>',
+		receiver: '<h3>Receiver</h3><p>The GNSS module\'s own identity, read straight off the chip at boot with the u-blox <i>MON-VER</i> message. <b>Module</b> is the silicon (a u-blox NEO-M9N here); <b>Firmware</b> is u-blox\'s on-chip software (their "SPG" standard-precision GNSS build) — separate from the tracker\'s own sketch version; <b>Protocol</b> is the UBX binary version the module speaks; and <b>Constellations</b> lists which satellite systems it is set to use.</p>',
+		sbas: '<h3>SBAS augmentation</h3><p>SBAS (Satellite-Based Augmentation System) is a free correction service broadcast from geostationary satellites — <b>EGNOS</b> over Europe, WAAS over North America, MSAS over Japan, GAGAN over India. It sends small corrections that sharpen the fix and flag any satellite it judges unsafe to use. This tile (from UBX <i>NAV-SBAS</i>) names the system in use, the <b>GEO</b> satellite\'s PRN number the receiver is listening to, and how many satellites are currently being corrected. "Not in use" simply means no SBAS satellite is being tracked right now — often just a low southern-sky view.</p>'
 	};
 	function initHelp() {
 		var modal = $('#satgps-help-modal'), content = $('#satgps-help-content');

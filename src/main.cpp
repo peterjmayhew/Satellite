@@ -73,6 +73,17 @@ uint32_t ttffMs = 0;     // time to first fix (ms)
 uint32_t odoDist = 0;    // distance since last reset (this power-on)
 uint32_t odoTotal = 0;   // lifetime cumulative distance
 
+// SBAS augmentation status (UBX NAV-SBAS)
+int sbasSys = -1;        // -1 unknown, 0 WAAS, 1 EGNOS, 2 MSAS, 3 GAGAN, 16 GPS
+int sbasPrn = 0;         // GEO PRN currently in use
+int sbasCnt = 0;         // number of SVs carrying SBAS corrections
+
+// Receiver identity (UBX MON-VER, captured once at boot)
+String rxModule = "";    // module type, e.g. "NEO-M9N"
+String rxFw = "";        // firmware version, e.g. "SPG 4.04"
+String rxProto = "";     // UBX protocol version, e.g. "32.01"
+String rxGnss = "";      // enabled GNSS list, e.g. "GPS;GLO;GAL;BDS"
+
 // Horizontal error ellipse (from UBX NAV-COV position covariance)
 float errMajorM = 0.0;   // semi-major axis 1-sigma std dev (m)
 float errMinorM = 0.0;   // semi-minor axis 1-sigma std dev (m)

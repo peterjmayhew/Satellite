@@ -4,7 +4,7 @@ Tags: gps, gnss, tracker, esp32, map
 Requires at least: 5.8
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.4.7
+Stable tag: 1.4.8
 License: GPLv2 or later
 
 Receive live GNSS telemetry from an ESP32 satellite receiver and present it as an
@@ -60,6 +60,18 @@ Ingest requires the secret API key in the `X-API-Key` header (constant-time
 compared). Read endpoints are admin-only unless you enable "Public dashboard".
 
 == Changelog ==
+
+= 1.4.8 =
+* New **Receiver** card exposes the module's own identity, read straight off the
+  chip at boot via UBX MON-VER: module type (e.g. NEO-M9N), firmware version
+  (u-blox SPG x.xx), UBX protocol version, and the enabled GNSS constellations.
+* The SBAS badge is now a real **augmentation-status** readout driven by UBX
+  NAV-SBAS: which SBAS system is in use (EGNOS over the UK, WAAS, MSAS, GAGAN),
+  the GEO satellite PRN being tracked, and how many satellites are carrying
+  differential corrections — instead of a plain on/off flag.
+* Ingest/latest endpoints and the schema gained `sbas_sys`, `sbas_prn`,
+  `sbas_cnt`, `rx_module`, `rx_fw`, `rx_proto` and `rx_gnss` (migrated
+  automatically on upgrade). Requires device firmware v1.21+.
 
 = 1.4.7 =
 * Clearer "Receiver health & integrity" section. Every tile now has honest

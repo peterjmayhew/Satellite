@@ -158,6 +158,20 @@ if ( ! defined( 'ABSPATH' ) ) {
 		</div>
 	</section>
 
+	<!-- Receiver identity + augmentation -->
+	<section class="satgps-card">
+		<h2><?php esc_html_e( 'Receiver', 'satgps' ); ?>
+			<button type="button" class="satgps-help" data-help="receiver" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button>
+		</h2>
+		<div class="satgps-tiles satgps-tiles-compact">
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Module', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="rx_module">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'GNSS receiver', 'satgps' ); ?></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Firmware', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="rx_fw">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'u-blox on-chip', 'satgps' ); ?></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Protocol', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="rx_proto">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'UBX version', 'satgps' ); ?></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Constellations', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="rx_gnss" style="font-size:15px">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'enabled GNSS', 'satgps' ); ?></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'SBAS augmentation', 'satgps' ); ?><button type="button" class="satgps-help satgps-help-sm" data-help="sbas" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button></div><div class="satgps-tile-value is-muted" data-field="sbas_status">—</div><div class="satgps-tile-sub" data-field="sbas_sub"><?php esc_html_e( 'differential corrections', 'satgps' ); ?></div></div>
+		</div>
+	</section>
+
 	<!-- History charts -->
 	<div class="satgps-grid-2">
 		<section class="satgps-card">

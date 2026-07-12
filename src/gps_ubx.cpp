@@ -16,6 +16,8 @@
     extern uint32_t ttffMs;
     extern uint32_t odoDist, odoTotal;
     extern float errMajorM, errMinorM, errOrientDeg;
+    extern int sbasSys, sbasPrn, sbasCnt;                 // NAV-SBAS augmentation status
+    extern String rxModule, rxFw, rxProto, rxGnss;        // MON-VER receiver identity
 
     // Link diagnostics (defined in main.cpp)
     extern uint32_t diagBytesRx, diagNmeaCount, diagUbxSync, diagUbxFrames, diagUbxBadCk, diagCfgSends, diagLastByteMs;
@@ -148,6 +150,14 @@
     // -power-on; UBX-NAV-RESETODO (01 10) takes an empty payload.
     sendUbx(gps, 0x01, 0x10, nullptr, 0);
 
+    // Enable NAV-SBAS (01 32) ~1 Hz — real augmentation status: which SBAS system
+    // (EGNOS over the UK), the GEO PRN in use, and how many SVs carry corrections.
+    cfgMsgRate(gps, 0x01, 0x32, 5);
+
+    // Poll MON-VER (0A 04) once — module type, firmware (SPG x.xx), protocol
+    // version and the enabled GNSS list. Static, so poll rather than stream.
+    sendUbx(gps, 0x0A, 0x04, nullptr, 0);
+
     // Disable common NMEA sentences (class 0xF0)
     cfgMsgRate(gps, 0xF0, 0x00, 0); // GGA
     cfgMsgRate(gps, 0xF0, 0x03, 0); // GSV
@@ -254,6 +264,38 @@
     odoTotal = u32(p + 12);                 // lifetime total distance (m)
     }
 
+    // NAV-SBAS (01 32) — SBAS augmentation status.
+    static void handleNavSbas(const uint8_t *p, uint16_t n) {
+    if (n < 12) return;
+    int prevSys = sbasSys, prevPrn = sbasPrn, prevCnt = sbasCnt;
+    sbasPrn = p[4];                         // GEO PRN in use
+    sbasSys = (int8_t)p[6];                 // -1 unknown, 0 WAAS, 1 EGNOS, 2 MSAS, 3 GAGAN, 16 GPS
+    sbasCnt = p[8];                         // number of SVs carrying SBAS corrections
+    if (sbasSys != prevSys || sbasPrn != prevPrn || sbasCnt != prevCnt) {
+        Serial.printf("[gps] NAV-SBAS sys=%d geo=%d cnt=%d mode=%d\n",
+                      sbasSys, sbasPrn, sbasCnt, (int)p[5]);
+    }
+    }
+
+    // MON-VER (0A 04) — receiver identity. sw(30) + hw(10) + N * 30-byte extension
+    // strings ("MOD=NEO-M9N", "PROTVER=32.01", "FWVER=SPG 4.04", the GNSS list).
+    static void handleMonVer(const uint8_t *p, uint16_t n) {
+    if (n < 40) return;
+    char sw[31]; memcpy(sw, p, 30); sw[30] = 0;   // swVersion (0..29)
+    uint16_t nExt = (n - 40) / 30;
+    for (uint16_t i = 0; i < nExt; i++) {
+        char e[31]; memcpy(e, p + 40 + i * 30, 30); e[30] = 0;
+        if (!strncmp(e, "MOD=", 4))          rxModule = String(e + 4);
+        else if (!strncmp(e, "PROTVER=", 8)) rxProto  = String(e + 8);
+        else if (!strncmp(e, "FWVER=", 6))   rxFw     = String(e + 6);
+        else if (strchr(e, ';') && (strstr(e,"GPS")||strstr(e,"GLO")||strstr(e,"GAL")||strstr(e,"BDS")))
+            rxGnss = String(e);
+    }
+    if (rxFw.length() == 0) rxFw = String(sw);    // fall back to swVersion
+    Serial.printf("[gps] MON-VER mod=%s fw=%s proto=%s gnss=%s\n",
+                  rxModule.c_str(), rxFw.c_str(), rxProto.c_str(), rxGnss.c_str());
+    }
+
     // NAV-COV (01 36) length 64 — position/velocity covariance (NED, m^2).
     // Derive the horizontal error ellipse from the 2x2 N/E position covariance.
     static void handleNavCov(const uint8_t *p, uint16_t n) {
@@ -332,7 +374,9 @@
     else if (cls == 0x01 && id == 0x36) { diagNavCov++;    handleNavCov(p, n); }
     else if (cls == 0x01 && id == 0x35) { diagNavSat++;    handleNavSat(p, n); }
     else if (cls == 0x01 && id == 0x09) {                  handleNavOdo(p, n); }
+    else if (cls == 0x01 && id == 0x32) {                  handleNavSbas(p, n); }
     else if (cls == 0x0A && id == 0x38) { diagMonRf++;     handleMonRf(p, n); }
+    else if (cls == 0x0A && id == 0x04) {                  handleMonVer(p, n); }
     }
 
     // --------------- Public API ---------------

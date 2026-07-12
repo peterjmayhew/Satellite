@@ -21,6 +21,8 @@ extern int rfJamState, rfJamInd, rfAgcPct, rfAntStatus, rfNoise, spoofState;
 extern uint32_t ttffMs;
 extern uint32_t odoDist, odoTotal;
 extern float errMajorM, errMinorM, errOrientDeg;
+extern int sbasSys, sbasPrn, sbasCnt;
+extern String rxModule, rxFw, rxProto, rxGnss;
 extern String timeUTC, dateUTC;
 
 static bool g_enabled = false;
@@ -68,6 +70,15 @@ static String buildJson() {
   s += "\"speed_acc_ms\":"; s += String(speedAcc_ms, 2);s += ",";
   s += "\"head_acc_deg\":"; s += String(headAcc_deg, 1);s += ",";
   s += "\"sbas\":";         s += (sbasUsed ? "true" : "false"); s += ",";
+  // SBAS augmentation status (UBX NAV-SBAS)
+  s += "\"sbas_sys\":";     s += sbasSys;               s += ",";
+  s += "\"sbas_prn\":";     s += sbasPrn;               s += ",";
+  s += "\"sbas_cnt\":";     s += sbasCnt;               s += ",";
+  // Receiver identity (UBX MON-VER, static)
+  s += "\"rx_module\":\"";  s += rxModule;              s += "\",";
+  s += "\"rx_fw\":\"";      s += rxFw;                  s += "\",";
+  s += "\"rx_proto\":\"";   s += rxProto;               s += "\",";
+  s += "\"rx_gnss\":\"";    s += rxGnss;                s += "\",";
   // Receiver health / integrity (UBX MON-RF + NAV-STATUS)
   s += "\"jam_state\":";    s += rfJamState;            s += ",";
   s += "\"jam_ind\":";      s += rfJamInd;              s += ",";
