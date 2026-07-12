@@ -171,6 +171,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Protocol', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="rx_proto">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'UBX version', 'satgps' ); ?></div></div>
 			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Constellations', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="rx_gnss" style="font-size:15px">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'enabled GNSS', 'satgps' ); ?></div></div>
 			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'SBAS augmentation', 'satgps' ); ?><button type="button" class="satgps-help satgps-help-sm" data-help="sbas" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button></div><div class="satgps-tile-value is-muted" data-field="sbas_status">—</div><div class="satgps-tile-sub" data-field="sbas_sub"><?php esc_html_e( 'differential corrections', 'satgps' ); ?></div></div>
+			<div class="satgps-tile"><div class="satgps-tile-label"><?php esc_html_e( 'Network', 'satgps' ); ?></div><div class="satgps-tile-value" data-field="ip" style="font-size:15px">—</div><div class="satgps-tile-sub"><?php esc_html_e( 'LAN IP · OTA target', 'satgps' ); ?></div></div>
 		</div>
 	</section>
 
@@ -181,6 +182,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 		</h2>
 		<div class="satgps-spectrum-wrap"><canvas id="satgps-spectrum" class="satgps-spectrum" width="900" height="240"></canvas></div>
 		<div class="satgps-spectrum-meta satgps-muted" data-field="spec_meta"></div>
+	</section>
+
+	<!-- RF spectrum waterfall (UBX-MON-SPAN history) -->
+	<section class="satgps-card" data-card="waterfall" hidden>
+		<h2><?php esc_html_e( 'Spectrum waterfall', 'satgps' ); ?>
+			<button type="button" class="satgps-help" data-help="waterfall" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button>
+		</h2>
+		<div class="satgps-spectrum-wrap"><canvas id="satgps-waterfall" class="satgps-spectrum" width="900" height="300"></canvas></div>
+		<div class="satgps-spectrum-meta satgps-muted" data-field="waterfall_meta"></div>
 	</section>
 
 	<!-- History charts -->

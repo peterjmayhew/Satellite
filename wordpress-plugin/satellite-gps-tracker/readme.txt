@@ -4,7 +4,7 @@ Tags: gps, gnss, tracker, esp32, map
 Requires at least: 5.8
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.4.10
+Stable tag: 1.4.11
 License: GPLv2 or later
 
 Receive live GNSS telemetry from an ESP32 satellite receiver and present it as an
@@ -60,6 +60,16 @@ Ingest requires the secret API key in the `X-API-Key` header (constant-time
 compared). Read endpoints are admin-only unless you enable "Public dashboard".
 
 == Changelog ==
+
+= 1.4.11 =
+* New **Spectrum waterfall** card: the RF spectrum stacked over time as a colour
+  heatmap, so interference that comes and goes shows up as streaks. Built from a
+  rolling, downsampled history of the MON-SPAN sweeps (kept in a bounded
+  per-device option; new `spectrum` REST route serves it). It fills in as sweeps
+  arrive.
+* The **Receiver** card now shows the device's **LAN IP** (its over-the-air
+  update target), from a new `ip` telemetry field. Requires firmware v1.24+,
+  which adds network (OTA) firmware updates.
 
 = 1.4.10 =
 * New **Live RF spectrum** card: a real-time spectrum-analyser plot of the L1

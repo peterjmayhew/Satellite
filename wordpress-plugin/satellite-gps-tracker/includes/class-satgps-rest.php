@@ -43,6 +43,17 @@ class SatGPS_REST {
 
 		register_rest_route(
 			SATGPS_REST_NS,
+			'/spectrum',
+			array(
+				'methods'             => 'GET',
+				'callback'            => array( $this, 'spectrum' ),
+				'permission_callback' => $read_perm,
+				'args'                => array( 'device' => array( 'sanitize_callback' => 'sanitize_text_field' ) ),
+			)
+		);
+
+		register_rest_route(
+			SATGPS_REST_NS,
 			'/track',
 			array(
 				'methods'             => 'GET',
@@ -200,6 +211,7 @@ class SatGPS_REST {
 			'geo_lat'      => isset( $body['geo_lat'] ) ? max( -90.0, min( 90.0, (float) $body['geo_lat'] ) ) : 0.0,
 			'geo_lon'      => isset( $body['geo_lon'] ) ? max( -180.0, min( 180.0, (float) $body['geo_lon'] ) ) : 0.0,
 			'geo_radius_m' => isset( $body['geo_radius_m'] ) ? max( 0, min( 1000000, (int) $body['geo_radius_m'] ) ) : 0,
+			'ip'           => isset( $body['ip'] ) && is_scalar( $body['ip'] ) ? substr( preg_replace( '/[^0-9a-fA-F:.]/', '', (string) $body['ip'] ), 0, 40 ) : '',
 			'uptime_ms'    => isset( $body['uptime_ms'] ) ? max( 0, (int) $body['uptime_ms'] ) : 0,
 			'sats_json'    => wp_json_encode( $this->sanitize_sats( isset( $body['sats'] ) ? $body['sats'] : array() ) ),
 		);
@@ -210,8 +222,10 @@ class SatGPS_REST {
 		}
 
 		// Live RF spectrum (UBX-MON-SPAN) is bulky and live-only, so it is NOT stored
-		// per-row; keep just the latest snapshot per device in an option.
+		// per-row; keep just the latest snapshot per device in an option, plus a
+		// downsampled rolling history for the waterfall view.
 		$this->store_spectrum( $device, $body );
+		$this->store_spectrum_history( $device, $body );
 
 		return rest_ensure_response(
 			array(
@@ -294,6 +308,78 @@ class SatGPS_REST {
 		);
 	}
 
+	/**
+	 * Option name holding the rolling spectrum history (waterfall) for a device.
+	 *
+	 * @param string $device Sanitised device id.
+	 * @return string
+	 */
+	private function spechist_option( $device ) {
+		return 'satgps_spechist_' . $device;
+	}
+
+	/**
+	 * Append a spectrum sample to the device's rolling waterfall history: downsample
+	 * to at most 128 bins, base64-pack, keep the most recent 96 rows. Bounded so the
+	 * option stays small.
+	 *
+	 * @param string $device Sanitised device id.
+	 * @param array  $body   Raw request body.
+	 */
+	private function store_spectrum_history( $device, $body ) {
+		if ( empty( $body['spectrum'] ) || ! is_scalar( $body['spectrum'] ) ) {
+			return;
+		}
+		$hex = preg_replace( '/[^0-9a-fA-F]/', '', (string) $body['spectrum'] );
+		$hex = substr( $hex, 0, 1024 );          // <= 512 bins, mirror store_spectrum()
+		$n   = intdiv( strlen( $hex ), 2 );
+		if ( $n < 2 ) {
+			return;
+		}
+		$src = array();
+		for ( $i = 0; $i < $n; $i++ ) {
+			$src[] = hexdec( substr( $hex, $i * 2, 2 ) );
+		}
+		$target = 128;
+		$bins   = array();
+		if ( $n <= $target ) {
+			$bins = $src;
+		} else {
+			$group = $n / $target;
+			for ( $b = 0; $b < $target; $b++ ) {
+				$start = (int) floor( $b * $group );
+				$end   = (int) floor( ( $b + 1 ) * $group );
+				if ( $end <= $start ) {
+					$end = $start + 1;
+				}
+				$sum = 0;
+				$cnt = 0;
+				for ( $k = $start; $k < $end && $k < $n; $k++ ) {
+					$sum += $src[ $k ];
+					$cnt++;
+				}
+				$bins[] = $cnt ? (int) round( $sum / $cnt ) : 0;
+			}
+		}
+		$packed   = base64_encode( implode( '', array_map( 'chr', $bins ) ) );
+		$rows_max = 96;
+		$hist     = get_option( $this->spechist_option( $device ) );
+		if ( ! is_array( $hist ) || ! isset( $hist['rows'] ) || ! is_array( $hist['rows'] ) ) {
+			$hist = array( 'v' => 1, 'rows' => array() );
+		}
+		$hist['bins']      = count( $bins );
+		$hist['center_hz'] = isset( $body['spec_center_hz'] ) ? max( 0, (int) $body['spec_center_hz'] ) : 0;
+		$hist['span_hz']   = isset( $body['spec_span_hz'] ) ? max( 0, (int) $body['spec_span_hz'] ) : 0;
+		$hist['rows'][]    = array(
+			't' => time(),
+			'd' => $packed,
+		);
+		if ( count( $hist['rows'] ) > $rows_max ) {
+			$hist['rows'] = array_slice( $hist['rows'], - $rows_max );
+		}
+		update_option( $this->spechist_option( $device ), $hist, false );
+	}
+
 	/* ------------------------------------------------------------------ */
 	/*  Reads                                                              */
 	/* ------------------------------------------------------------------ */
@@ -372,6 +458,7 @@ class SatGPS_REST {
 				'geo_lat'      => isset( $row['geo_lat'] ) ? (float) $row['geo_lat'] : 0.0,
 				'geo_lon'      => isset( $row['geo_lon'] ) ? (float) $row['geo_lon'] : 0.0,
 				'geo_radius_m' => isset( $row['geo_radius_m'] ) ? (int) $row['geo_radius_m'] : 0,
+				'ip'           => isset( $row['ip'] ) ? (string) $row['ip'] : '',
 				'sats_used'    => (int) $row['sats_used'],
 				'sats_in_view' => (int) $row['sats_in_view'],
 				'sats'         => $sats,
@@ -389,6 +476,35 @@ class SatGPS_REST {
 		}
 
 		return rest_ensure_response( $out );
+	}
+
+	/**
+	 * Rolling RF-spectrum history (waterfall) for a device.
+	 *
+	 * @param WP_REST_Request $request Request.
+	 * @return WP_REST_Response
+	 */
+	public function spectrum( $request ) {
+		$device_raw = $request->get_param( 'device' );
+		$device     = is_scalar( $device_raw ) ? sanitize_text_field( (string) $device_raw ) : '';
+		if ( '' === $device ) {
+			$row    = SatGPS_DB::get_latest( '' );
+			$device = $row ? $row['device'] : '';
+		}
+		$hist = '' !== $device ? get_option( $this->spechist_option( $device ) ) : false;
+		if ( ! is_array( $hist ) || empty( $hist['rows'] ) ) {
+			return rest_ensure_response( array( 'found' => false ) );
+		}
+		return rest_ensure_response(
+			array(
+				'found'     => true,
+				'device'    => $device,
+				'bins'      => isset( $hist['bins'] ) ? (int) $hist['bins'] : 0,
+				'center_hz' => isset( $hist['center_hz'] ) ? (int) $hist['center_hz'] : 0,
+				'span_hz'   => isset( $hist['span_hz'] ) ? (int) $hist['span_hz'] : 0,
+				'rows'      => array_values( $hist['rows'] ),
+			)
+		);
 	}
 
 	/**

@@ -92,6 +92,64 @@
 			}
 		}
 	}
+	// Decode a base64 string into an array of 0-255 byte values.
+	function b64ToBytes(b64) {
+		var bin;
+		try { bin = atob(b64 || ''); } catch (e) { return []; }
+		var n = bin.length, out = new Array(n);
+		for (var i = 0; i < n; i++) { out[i] = bin.charCodeAt(i) & 0xff; }
+		return out;
+	}
+	// Power (0..1) -> [r,g,b] on a spectrum-waterfall ramp (near-black->blue->cyan
+	// ->green->yellow->red).
+	function heatColor(t) {
+		t = t < 0 ? 0 : (t > 1 ? 1 : t);
+		var s = [[0, 8, 12, 28], [0.15, 20, 40, 110], [0.35, 20, 110, 150], [0.55, 40, 170, 90], [0.75, 225, 200, 50], [1, 235, 60, 35]];
+		for (var i = 1; i < s.length; i++) {
+			if (t <= s[i][0]) {
+				var a = s[i - 1], b = s[i], f = (t - a[0]) / ((b[0] - a[0]) || 1);
+				return [Math.round(a[1] + (b[1] - a[1]) * f), Math.round(a[2] + (b[2] - a[2]) * f), Math.round(a[3] + (b[3] - a[3]) * f)];
+			}
+		}
+		return [235, 60, 35];
+	}
+	// Draw a spectrum waterfall: each history row is a time sample (oldest at top),
+	// x is frequency, colour is power. rows = [{t, d(base64 bins)}, ...].
+	function drawWaterfall(canvas, rows, bins, centerHz, spanHz) {
+		if (!canvas || !canvas.getContext || !rows.length || bins < 2) { return; }
+		var ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
+		var text = cssVar('--satgps-muted', '#97a3b6'), okc = cssVar('--satgps-ok', '#22c55e');
+		ctx.clearRect(0, 0, W, H);
+		var padL = 8, padR = 8, padT = 8, padB = 22, pW = W - padL - padR, pH = H - padT - padB, nRows = rows.length;
+		var off = document.createElement('canvas'); off.width = bins; off.height = nRows;
+		var octx = off.getContext('2d'), img = octx.createImageData(bins, nRows);
+		for (var r = 0; r < nRows; r++) {
+			var bytes = b64ToBytes(rows[r].d);
+			for (var c = 0; c < bins; c++) {
+				var col = heatColor((bytes[c] || 0) / 255), idx = (r * bins + c) * 4;
+				img.data[idx] = col[0]; img.data[idx + 1] = col[1]; img.data[idx + 2] = col[2]; img.data[idx + 3] = 255;
+			}
+		}
+		octx.putImageData(img, 0, 0);
+		ctx.imageSmoothingEnabled = true;
+		ctx.drawImage(off, 0, 0, bins, nRows, padL, padT, pW, pH);
+		ctx.strokeStyle = cssVar('--satgps-border', '#2a3446'); ctx.lineWidth = 1;
+		ctx.strokeRect(padL, padT, pW, pH);
+		if (centerHz > 0 && spanHz > 0) {
+			var f0 = (centerHz - spanHz / 2) / 1e6, f1 = (centerHz + spanHz / 2) / 1e6;
+			ctx.fillStyle = text; ctx.font = '11px system-ui, -apple-system, sans-serif'; ctx.textBaseline = 'top';
+			ctx.textAlign = 'left'; ctx.fillText(f0.toFixed(1), padL, padT + pH + 5);
+			ctx.textAlign = 'right'; ctx.fillText(f1.toFixed(1) + ' MHz', W - padR, padT + pH + 5);
+			var l1 = 1575.42;
+			if (l1 >= f0 && l1 <= f1) {
+				var lx = padL + pW * (l1 - f0) / (f1 - f0);
+				ctx.strokeStyle = okc; ctx.setLineDash([4, 3]); ctx.globalAlpha = 0.65;
+				ctx.beginPath(); ctx.moveTo(lx, padT); ctx.lineTo(lx, padT + pH); ctx.stroke();
+				ctx.setLineDash([]); ctx.globalAlpha = 1;
+				ctx.fillStyle = okc; ctx.textAlign = 'center'; ctx.fillText('L1', lx, padT + pH + 5);
+			}
+		}
+	}
 
 	function api(path, params) {
 		var url = CFG.restUrl + path;
@@ -617,6 +675,7 @@
 		setField('rx_module', latest.rx_module || '—');
 		setField('rx_fw', latest.rx_fw || '—');
 		setField('rx_proto', latest.rx_proto || '—');
+		setField('ip', latest.ip || '—');
 		if (latest.rx_gnss) {
 			setField('rx_gnss', String(latest.rx_gnss).split(';')
 				.map(function (g) { return gnssName(g.trim()); })
@@ -670,10 +729,23 @@
 		return new Date(now - secs * 1000).toISOString();
 	}
 
+	function refreshWaterfall() {
+		return api('spectrum', { device: state.device }).then(function (h) {
+			var card = document.querySelector('[data-card="waterfall"]');
+			if (!h.found || !h.rows || !h.rows.length) { if (card) { card.hidden = true; } return; }
+			if (card) { card.hidden = false; }
+			drawWaterfall(document.getElementById('satgps-waterfall'), h.rows, h.bins, h.center_hz, h.span_hz);
+			var first = h.rows[0].t, last = h.rows[h.rows.length - 1].t;
+			var mins = Math.max(0, Math.round((last - first) / 60));
+			setField('waterfall_meta', h.rows.length + (h.rows.length === 1 ? ' sweep' : ' sweeps') + ' · ~' + mins + ' min of history · oldest at top, newest at bottom');
+		}).catch(function () {});
+	}
+
 	function refreshLatest() {
 		return api('latest', { device: state.device }).then(function (latest) {
 			updateStatus(latest);
 			updateTiles(latest);
+			refreshWaterfall();
 			if (latest.found) {
 				updateMarker(latest);
 				updateGeofence(latest);
@@ -790,7 +862,8 @@
 		receiver: '<h3>Receiver</h3><p>The GNSS module\'s own identity, read straight off the chip at boot with the u-blox <i>MON-VER</i> message. <b>Module</b> is the silicon (a u-blox NEO-M9N here); <b>Firmware</b> is u-blox\'s on-chip software (their "SPG" standard-precision GNSS build) — separate from the tracker\'s own sketch version; <b>Protocol</b> is the UBX binary version the module speaks; and <b>Constellations</b> lists which satellite systems it is set to use.</p>',
 		sbas: '<h3>SBAS augmentation</h3><p>SBAS (Satellite-Based Augmentation System) is a free correction service broadcast from geostationary satellites — <b>EGNOS</b> over Europe, WAAS over North America, MSAS over Japan, GAGAN over India. It sends small corrections that sharpen the fix and flag any satellite it judges unsafe to use. This tile (from UBX <i>NAV-SBAS</i>) names the system in use, the <b>GEO</b> satellite\'s PRN number the receiver is listening to, and how many satellites are currently being corrected. "Not in use" simply means no SBAS satellite is being tracked right now — often just a low southern-sky view.</p>',
 		uart: '<h3>UART link load</h3><p>The GNSS module streams its data to the ESP32 over a serial (UART) link. This gauge, from UBX <i>MON-COMMS</i>, shows how full the receiver\'s transmit buffer for that link is — essentially the backlog of data waiting to be sent. Low and steady is healthy; a persistently <b>high</b> reading (amber) means the host isn\'t reading the stream fast enough, and an <b>overrun</b> (red) means the buffer filled completely and bytes were dropped. The "peak" figure is the highest level seen in the last monitoring window. It is a plumbing check on the link itself, separate from satellite signal quality.</p>',
-		spectrum: '<h3>Live RF spectrum</h3><p>A real spectrum-analyser sweep from inside the receiver (UBX <i>MON-SPAN</i>): the strength of every radio frequency across the band around <b>GPS L1</b> (~1575 MHz, marked). The satellite signals themselves are far too weak to see — what you are looking at is the noise floor. A flat, even floor is healthy; a sharp <b>spike</b> or a raised hump is interference (a jammer, a nearby electronic device, or an out-of-band transmitter) that can degrade the fix. The vertical scale is relative dB (comparative, not absolute power), and "PGA" is the internal amplifier gain applied before this sweep.</p>'
+		spectrum: '<h3>Live RF spectrum</h3><p>A real spectrum-analyser sweep from inside the receiver (UBX <i>MON-SPAN</i>): the strength of every radio frequency across the band around <b>GPS L1</b> (~1575 MHz, marked). The satellite signals themselves are far too weak to see — what you are looking at is the noise floor. A flat, even floor is healthy; a sharp <b>spike</b> or a raised hump is interference (a jammer, a nearby electronic device, or an out-of-band transmitter) that can degrade the fix. The vertical scale is relative dB (comparative, not absolute power), and "PGA" is the internal amplifier gain applied before this sweep.</p>',
+		waterfall: '<h3>Spectrum waterfall</h3><p>The same RF spectrum as above, but stacked over <b>time</b> so you can spot changes. Each horizontal line is one sweep of the band; the newest is at the bottom and older sweeps scroll up. Colour is signal strength — dark = quiet, bright (green→yellow→red) = strong. A steady environment shows smooth vertical bands; a <b>bright horizontal streak</b> is a burst of interference at a moment in time, and a <b>bright vertical stripe</b> is a persistent signal at one frequency. It builds up gradually as new sweeps arrive.</p>'
 	};
 	function initHelp() {
 		var modal = $('#satgps-help-modal'), content = $('#satgps-help-content');

@@ -53,6 +53,7 @@ static String buildJson() {
   s += "{";
   s += "\"device\":\""; s += SATGPS_DEVICE_ID; s += "\",";
   s += "\"fw\":\"";     s += VERSION;          s += "\",";
+  s += "\"ip\":\"";     s += WiFi.localIP().toString(); s += "\",";
   s += "\"ts\":\"";     s += isoTimestamp();   s += "\",";
   s += "\"date\":\"";   s += dateUTC;          s += "\",";
   s += "\"time\":\"";   s += timeUTC;          s += "\",";

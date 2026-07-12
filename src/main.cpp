@@ -10,6 +10,9 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <SPI.h>
+#include <WiFi.h>
+#include <ArduinoOTA.h>
+#include "secrets.h"
 #include "display.h"
 #include "config.h"
 #include "sdcard.h"
@@ -32,6 +35,11 @@
 
 // Geofence radius (m) for the zone auto-configured at the device's power-on location.
 #define GEOFENCE_RADIUS_M 150
+
+// OTA password (from secrets.h; empty = open OTA on the LAN, not recommended).
+#ifndef OTA_PASSWORD
+#define OTA_PASSWORD ""
+#endif
 
 // --- Globals ---
 HardwareSerial GPSserial(1);
@@ -323,12 +331,17 @@ void setup() {
 
 // Incremented at the top of every loop(); watched by swWatchdogTask.
 static volatile uint32_t g_loopBeat = 0;
+// Set while an OTA flash is running. ArduinoOTA.handle() blocks loop() for tens of
+// seconds during a flash, so the watchdog must not "self-heal" then. Belt-and-braces:
+// the OTA callbacks ALSO feed g_loopBeat, so a healthy transfer never looks stalled.
+static volatile bool otaInProgress = false;
 
 static void swWatchdogTask(void*) {
   uint32_t last = 0;
   uint8_t  stalls = 0;
   for (;;) {
     vTaskDelay(pdMS_TO_TICKS(1000));
+    if (otaInProgress) { last = g_loopBeat; stalls = 0; continue; }  // never reboot mid-OTA
     uint32_t beat = g_loopBeat;
     if (beat == last) {
       // No legitimate loop() operation takes anywhere near this long (the longest,
@@ -345,6 +358,35 @@ static void swWatchdogTask(void*) {
   }
 }
 
+// ---- Over-the-air firmware update (ArduinoOTA / espota) ----
+// Called once after WiFi connects. The callbacks keep the software watchdog fed
+// (g_loopBeat) and hold otaInProgress so a multi-second flash isn't mistaken for
+// a hang. onProgress fires per network chunk — hundreds of times across the image.
+static void otaSetup() {
+  ArduinoOTA.setHostname(SATGPS_DEVICE_ID);
+  if (strlen(OTA_PASSWORD) > 0) { ArduinoOTA.setPassword(OTA_PASSWORD); }
+  ArduinoOTA.onStart([]() {
+    otaInProgress = true;
+    g_loopBeat++;
+    Serial.println("[ota] update starting - do not power off");
+  });
+  ArduinoOTA.onProgress([](unsigned int prog, unsigned int total) {
+    g_loopBeat++;                       // feed the software watchdog through the flash
+    static uint32_t lastPct = 999;
+    uint32_t pct = total ? (prog * 100UL / total) : 0;
+    if (pct != lastPct && (pct % 10) == 0) { lastPct = pct; Serial.printf("[ota] %lu%%\n", (unsigned long)pct); }
+  });
+  ArduinoOTA.onEnd([]() { Serial.println("[ota] complete - rebooting into new firmware"); });
+  ArduinoOTA.onError([](ota_error_t err) {
+    otaInProgress = false;              // re-arm the watchdog on failure
+    Serial.printf("[ota] error %u\n", (unsigned)err);
+  });
+  ArduinoOTA.begin();
+  Serial.printf("[ota] ready as \"%s\" at %s port 3232 (%s)\n",
+                SATGPS_DEVICE_ID, WiFi.localIP().toString().c_str(),
+                strlen(OTA_PASSWORD) > 0 ? "password set" : "NO PASSWORD - set OTA_PASSWORD in secrets.h");
+}
+
 // --- Forward decls ---
 static void handleHeartbeat();
 static void handleDebug();
@@ -355,6 +397,15 @@ static void handleAutoRefresh();
 // --- Loop ---
 void loop() {
   g_loopBeat++;   // feed the software watchdog (swWatchdogTask)
+
+  // Network firmware updates: start the OTA listener once WiFi is up, then service
+  // it every loop. handle() blocks for the whole flash once a push begins.
+  static bool otaReady = false;
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!otaReady) { otaSetup(); otaReady = true; }
+    ArduinoOTA.handle();
+  }
+
   handleHeartbeat();
   handleDebug();
   handleSerialDiag();

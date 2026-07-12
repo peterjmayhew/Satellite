@@ -21,3 +21,8 @@
 
 // How often to POST telemetry, in milliseconds.
 #define SATGPS_POST_INTERVAL_MS 10000
+
+// ---- Over-the-air (OTA) firmware updates ----
+// Password required to push firmware over WiFi (espota --auth=...). STRONGLY
+// recommended: leaving it empty allows anyone on your LAN to reflash the device.
+#define OTA_PASSWORD ""

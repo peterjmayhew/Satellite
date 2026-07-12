@@ -88,6 +88,7 @@ class SatGPS_DB {
 			geo_lat double NOT NULL DEFAULT 0,
 			geo_lon double NOT NULL DEFAULT 0,
 			geo_radius_m int(10) unsigned NOT NULL DEFAULT 0,
+			ip varchar(40) NOT NULL DEFAULT '',
 			uptime_ms bigint(20) unsigned NOT NULL DEFAULT 0,
 			sats_json longtext NULL,
 			PRIMARY KEY  (id),
@@ -161,6 +162,7 @@ class SatGPS_DB {
 				'geo_lat'      => $d['geo_lat'],
 				'geo_lon'      => $d['geo_lon'],
 				'geo_radius_m' => $d['geo_radius_m'],
+				'ip'           => $d['ip'],
 				'uptime_ms'    => $d['uptime_ms'],
 				'sats_json'    => $d['sats_json'],
 			),
@@ -174,6 +176,7 @@ class SatGPS_DB {
 				'%s', '%s', '%s', '%s',
 				'%d', '%d', '%d', '%d',
 				'%d', '%d', '%f', '%f', '%d',
+				'%s',
 				'%d', '%s',
 			)
 		);
