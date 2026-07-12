@@ -157,8 +157,17 @@ void wifiUplinkInit() {
   // LIGHT WiFi.disconnect(), never disconnect(true), plus the software watchdog.)
   WiFi.setAutoReconnect(false);
 
+  // Lower the WiFi transmit power. At full power (~19.5 dBm) the RF can be
+  // over-driven / distorted on some ESP32 boards, and certain APs respond by
+  // rejecting the association with reason=2 (AUTH_EXPIRE). Backing off to ~8.5 dBm
+  // is a documented fix for this exact error (Arduino forum / esp32 GitHub issues).
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.printf("[uplink] WiFi connecting to \"%s\"...\n", WIFI_SSID);
+  // Re-apply after begin() in case the connect path reset it, and log the result.
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  Serial.printf("[uplink] WiFi connecting to \"%s\" (txpower now %d)...\n",
+                WIFI_SSID, (int)WiFi.getTxPower());
 }
 
 void wifiUplinkLoop() {
