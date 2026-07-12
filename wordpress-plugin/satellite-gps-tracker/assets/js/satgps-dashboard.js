@@ -47,6 +47,9 @@
 	}
 
 	var useMph = CFG.units === 'mph';
+	// Last-seen cumulative UART overrun count, to detect *new* drops between refreshes
+	// (uart_ovf is a lifetime counter, so only a positive delta is a live problem).
+	var prevUartOvf = null;
 	function spd(kmh) { return useMph ? kmh * 0.6213711922 : kmh; }
 	function dist(km) { return useMph ? km * 0.6213711922 : km; }
 	var spdUnit = useMph ? 'mph' : 'km/h';
@@ -471,7 +474,39 @@
 			// TTFF is a startup score, not a live problem, so keep it out of the roll-up.
 		}
 
-		// Roll-up chip: worst live integrity verdict across jam/agc/antenna/spoof.
+		// UART link load (MON-COMMS) — how full the receiver's UART transmit buffer
+		// to the ESP32 gets. A live plumbing gauge: high = the host isn't draining
+		// the data stream fast enough, overruns = bytes actually dropped. -1/missing
+		// = not reported yet (plain-NMEA mode or before the first MON-COMMS).
+		var ul = latest.uart_tx_pct;
+		var ubar = field('uart_bar');
+		if (ul == null || ul < 0) {
+			setHealth('uart', '—', 'muted');
+			setField('uart_sub', 'receiver → host buffer');
+			if (ubar) { ubar.style.width = '0%'; ubar.style.background = 'var(--satgps-muted)'; }
+		} else {
+			var ovf = latest.uart_ovf || 0;
+			var upeak = (latest.uart_tx_peak != null && latest.uart_tx_peak >= 0) ? latest.uart_tx_peak : ul;
+			// Live state uses the current-period load (uart_tx_pct). The all-time peak
+			// and lifetime overrun total are cumulative, so they inform but must NOT
+			// latch the live chip — only a *fresh* overrun since the last refresh
+			// (positive delta; a reboot resets the counter, so guard against that) is
+			// treated as a live "dropping bytes now" problem.
+			var newDrop = (prevUartOvf !== null && ovf > prevUartOvf);
+			prevUartOvf = ovf;
+			var u_state = (ul >= 90 || newDrop) ? 'bad' : (ul >= 70 ? 'warn' : 'ok');
+			setHealth('uart', ul + '%', u_state);
+			if (ubar) {
+				ubar.style.width = Math.max(0, Math.min(100, ul)) + '%';
+				ubar.style.background = { ok: 'var(--satgps-ok)', warn: 'var(--satgps-warn)', bad: 'var(--satgps-bad)' }[u_state];
+			}
+			var ovfStr = ovf > 0 ? ' · ' + ovf + (ovf === 1 ? ' overrun' : ' overruns') : '';
+			setField('uart_sub', 'peak ' + upeak + '%' + ovfStr);
+			note(u_state);
+		}
+
+		// Roll-up chip: worst live integrity verdict across jam/agc/antenna/spoof
+		// and UART link load (live load + fresh drops only — not its historical peak).
 		var chip = field('integrity');
 		if (chip) {
 			var label = ['Not measured', 'All clear', 'Watch', 'Problem'][worst];
@@ -651,7 +686,8 @@
 		ttff: '<h3>Time to first fix</h3><p>A stopwatch on the receiver\'s last boot: the time from power-on to its first position fix. Starting cold — no memory of the time, almanac or where it was — takes about half a minute; a warm restart is only seconds. A long time usually just means it booted somewhere with a poor view of the sky. It stays fixed after that first fix, so treat it as a startup score, not a live gauge.</p>',
 		odo: '<h3>Odometer</h3><p>The receiver\'s own trip counter: cumulative ground distance travelled since it last powered up, computed on-chip. Because it is hardware-filtered it stays accurate at walking pace and shrugs off the GPS jitter that can inflate a distance worked out by joining up track points. The "total" figure is the module\'s lifetime distance across all trips.</p>',
 		receiver: '<h3>Receiver</h3><p>The GNSS module\'s own identity, read straight off the chip at boot with the u-blox <i>MON-VER</i> message. <b>Module</b> is the silicon (a u-blox NEO-M9N here); <b>Firmware</b> is u-blox\'s on-chip software (their "SPG" standard-precision GNSS build) — separate from the tracker\'s own sketch version; <b>Protocol</b> is the UBX binary version the module speaks; and <b>Constellations</b> lists which satellite systems it is set to use.</p>',
-		sbas: '<h3>SBAS augmentation</h3><p>SBAS (Satellite-Based Augmentation System) is a free correction service broadcast from geostationary satellites — <b>EGNOS</b> over Europe, WAAS over North America, MSAS over Japan, GAGAN over India. It sends small corrections that sharpen the fix and flag any satellite it judges unsafe to use. This tile (from UBX <i>NAV-SBAS</i>) names the system in use, the <b>GEO</b> satellite\'s PRN number the receiver is listening to, and how many satellites are currently being corrected. "Not in use" simply means no SBAS satellite is being tracked right now — often just a low southern-sky view.</p>'
+		sbas: '<h3>SBAS augmentation</h3><p>SBAS (Satellite-Based Augmentation System) is a free correction service broadcast from geostationary satellites — <b>EGNOS</b> over Europe, WAAS over North America, MSAS over Japan, GAGAN over India. It sends small corrections that sharpen the fix and flag any satellite it judges unsafe to use. This tile (from UBX <i>NAV-SBAS</i>) names the system in use, the <b>GEO</b> satellite\'s PRN number the receiver is listening to, and how many satellites are currently being corrected. "Not in use" simply means no SBAS satellite is being tracked right now — often just a low southern-sky view.</p>',
+		uart: '<h3>UART link load</h3><p>The GNSS module streams its data to the ESP32 over a serial (UART) link. This gauge, from UBX <i>MON-COMMS</i>, shows how full the receiver\'s transmit buffer for that link is — essentially the backlog of data waiting to be sent. Low and steady is healthy; a persistently <b>high</b> reading (amber) means the host isn\'t reading the stream fast enough, and an <b>overrun</b> (red) means the buffer filled completely and bytes were dropped. The "peak" figure is the highest level seen in the last monitoring window. It is a plumbing check on the link itself, separate from satellite signal quality.</p>'
 	};
 	function initHelp() {
 		var modal = $('#satgps-help-modal'), content = $('#satgps-help-content');

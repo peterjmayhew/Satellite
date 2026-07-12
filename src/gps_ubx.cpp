@@ -18,6 +18,7 @@
     extern float errMajorM, errMinorM, errOrientDeg;
     extern int sbasSys, sbasPrn, sbasCnt;                 // NAV-SBAS augmentation status
     extern String rxModule, rxFw, rxProto, rxGnss;        // MON-VER receiver identity
+    extern int uartTxPct, uartTxPeak, uartRxPct, uartOvf; // MON-COMMS UART link load
 
     // Link diagnostics (defined in main.cpp)
     extern uint32_t diagBytesRx, diagNmeaCount, diagUbxSync, diagUbxFrames, diagUbxBadCk, diagCfgSends, diagLastByteMs;
@@ -125,6 +126,10 @@
 
     // Enable MON-RF (0A 38) every ~5 s — RF interference/jamming + antenna health
     cfgMsgRate(gps, 0x0A, 0x38, 25);
+
+    // Enable MON-COMMS (0A 36) every ~5 s — UART port buffer load / overruns
+    // (the "UART link load" gauge). Slow-changing, so a low rate is plenty.
+    cfgMsgRate(gps, 0x0A, 0x36, 25);
 
     // Ensure SBAS is enabled (EGNOS over Europe) — usually default-on; make it explicit.
     // CFG-SIGNAL-SBAS_ENA = 0x10310020. Non-fatal if the module ignores it.
@@ -277,6 +282,43 @@
     }
     }
 
+    // MON-COMMS (0A 36) — per-port comms load. Header (8 B): version, nPorts,
+    // txErrors, reserved, protIds[4]; then nPorts * 40-byte port blocks from
+    // offset 8. We track UART1 (portId 0x0100), the receiver->ESP32 data path:
+    // its TX buffer fills when the host reads too slowly; overruns = dropped bytes.
+    // Offsets verified against the NEO-M9N Interface Description (UBX-19035940, proto 32).
+    static void handleMonComms(const uint8_t *p, uint16_t n) {
+    if (n < 8) return;
+    uint8_t nPorts = p[1];
+    static bool loggedPorts = false;
+    for (uint8_t i = 0; i < nPorts; i++) {
+        uint16_t off = 8 + (uint16_t)i * 40;
+        if (off + 40 > n) break;
+        const uint8_t *b = p + off;
+        if (u16(b) == 0x0100) {                 // UART1
+            int prevTx = uartTxPct, prevPeak = uartTxPeak, prevOvf = uartOvf;
+            uartTxPct  = b[8];                  // txUsage: max TX buffer fill last period (%)
+            uartTxPeak = b[9];                  // txPeakUsage: all-time peak TX fill (%)
+            uartRxPct  = b[16];                 // rxUsage: max RX buffer fill last period (%)
+            uartOvf    = (int)u16(b + 18);      // overrunErrs: 100 ms slots with RX overrun
+            if (uartTxPct != prevTx || uartTxPeak != prevPeak || uartOvf != prevOvf) {
+                Serial.printf("[gps] MON-COMMS UART1 tx=%d%% peak=%d%% rx=%d%% ovf=%d\n",
+                              uartTxPct, uartTxPeak, uartRxPct, uartOvf);
+            }
+        }
+    }
+    if (!loggedPorts) {                         // one-time: confirm the port map on hardware
+        loggedPorts = true;
+        Serial.printf("[gps] MON-COMMS nPorts=%u ports:", nPorts);
+        for (uint8_t i = 0; i < nPorts; i++) {
+            uint16_t off = 8 + (uint16_t)i * 40;
+            if (off + 40 > n) break;
+            Serial.printf(" 0x%04X", u16(p + off));
+        }
+        Serial.printf("\n");
+    }
+    }
+
     // MON-VER (0A 04) — receiver identity. sw(30) + hw(10) + N * 30-byte extension
     // strings ("MOD=NEO-M9N", "PROTVER=32.01", "FWVER=SPG 4.04", the GNSS list).
     static void handleMonVer(const uint8_t *p, uint16_t n) {
@@ -376,6 +418,7 @@
     else if (cls == 0x01 && id == 0x09) {                  handleNavOdo(p, n); }
     else if (cls == 0x01 && id == 0x32) {                  handleNavSbas(p, n); }
     else if (cls == 0x0A && id == 0x38) { diagMonRf++;     handleMonRf(p, n); }
+    else if (cls == 0x0A && id == 0x36) {                  handleMonComms(p, n); }
     else if (cls == 0x0A && id == 0x04) {                  handleMonVer(p, n); }
     }
 

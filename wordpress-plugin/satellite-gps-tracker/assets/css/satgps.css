@@ -194,6 +194,9 @@
 .satgps-const-name { font-weight: 600; }
 .satgps-bar { background: var(--satgps-card-2); border-radius: 6px; height: 16px; overflow: hidden; border: 1px solid var(--satgps-border); }
 .satgps-bar span { display: block; height: 100%; border-radius: 6px 0 0 6px; }
+/* Compact in-tile gauge bar (e.g. UART link load). */
+.satgps-bar-sm { height: 7px; margin: 7px 0 5px; }
+.satgps-bar-sm span { width: 0; background: var(--satgps-muted); transition: width .3s ease, background-color .3s ease; }
 .satgps-const-count { text-align: right; color: var(--satgps-muted); font-variant-numeric: tabular-nums; }
 
 .satgps-muted { color: var(--satgps-muted); font-weight: 400; font-size: 12px; }

@@ -4,7 +4,7 @@ Tags: gps, gnss, tracker, esp32, map
 Requires at least: 5.8
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.4.8
+Stable tag: 1.4.9
 License: GPLv2 or later
 
 Receive live GNSS telemetry from an ESP32 satellite receiver and present it as an
@@ -60,6 +60,16 @@ Ingest requires the secret API key in the `X-API-Key` header (constant-time
 compared). Read endpoints are admin-only unless you enable "Public dashboard".
 
 == Changelog ==
+
+= 1.4.9 =
+* New **UART link load** gauge in the receiver health section, from UBX
+  MON-COMMS: how full the receiver's UART transmit buffer to the ESP32 gets
+  (current and peak) and a count of any overrun errors — a direct read on
+  whether the host is keeping up with the GNSS data stream. Goes amber when the
+  buffer runs high and red on any dropped bytes.
+* Ingest/latest endpoints and the schema gained `uart_tx_pct`, `uart_tx_peak`,
+  `uart_rx_pct` and `uart_ovf` (migrated automatically on upgrade). Requires
+  device firmware v1.22+.
 
 = 1.4.8 =
 * New **Receiver** card exposes the module's own identity, read straight off the

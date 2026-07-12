@@ -84,6 +84,12 @@ String rxFw = "";        // firmware version, e.g. "SPG 4.04"
 String rxProto = "";     // UBX protocol version, e.g. "32.01"
 String rxGnss = "";      // enabled GNSS list, e.g. "GPS;GLO;GAL;BDS"
 
+// UART link load (UBX MON-COMMS): receiver UART1 buffer usage to the ESP32.
+int uartTxPct = -1;      // tx buffer usage %, -1 = not reported yet
+int uartTxPeak = -1;     // peak tx buffer usage %
+int uartRxPct = -1;      // rx buffer usage %
+int uartOvf = 0;         // overrun errors (bytes/timeslots dropped)
+
 // Horizontal error ellipse (from UBX NAV-COV position covariance)
 float errMajorM = 0.0;   // semi-major axis 1-sigma std dev (m)
 float errMinorM = 0.0;   // semi-minor axis 1-sigma std dev (m)

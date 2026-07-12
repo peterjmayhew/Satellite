@@ -23,6 +23,7 @@ extern uint32_t odoDist, odoTotal;
 extern float errMajorM, errMinorM, errOrientDeg;
 extern int sbasSys, sbasPrn, sbasCnt;
 extern String rxModule, rxFw, rxProto, rxGnss;
+extern int uartTxPct, uartTxPeak, uartRxPct, uartOvf;
 extern String timeUTC, dateUTC;
 
 static bool g_enabled = false;
@@ -79,6 +80,11 @@ static String buildJson() {
   s += "\"rx_fw\":\"";      s += rxFw;                  s += "\",";
   s += "\"rx_proto\":\"";   s += rxProto;               s += "\",";
   s += "\"rx_gnss\":\"";    s += rxGnss;                s += "\",";
+  // UART link load (UBX MON-COMMS)
+  s += "\"uart_tx_pct\":";  s += uartTxPct;             s += ",";
+  s += "\"uart_tx_peak\":"; s += uartTxPeak;            s += ",";
+  s += "\"uart_rx_pct\":";  s += uartRxPct;             s += ",";
+  s += "\"uart_ovf\":";     s += uartOvf;               s += ",";
   // Receiver health / integrity (UBX MON-RF + NAV-STATUS)
   s += "\"jam_state\":";    s += rfJamState;            s += ",";
   s += "\"jam_ind\":";      s += rfJamInd;              s += ",";
