@@ -132,7 +132,8 @@ void wifiUplinkInit() {
   }
   g_enabled = true;
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
+  WiFi.setSleep(true);   // modem sleep between posts — big cut in average radio
+                         // current so the LCD+GPS+WiFi peak stops browning out.
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.printf("[uplink] WiFi connecting to \"%s\"...\n", WIFI_SSID);
 }
