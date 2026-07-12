@@ -12,8 +12,9 @@
     extern float accH_m, accV_m, vspeed_ms, hae_m, geoidSep_m, speedAcc_ms, headAcc_deg, vdop, pdop;
     extern int fixType;
     extern bool sbasUsed;
-    extern int rfJamState, rfJamInd, rfAgcPct, rfAntStatus, spoofState;
+    extern int rfJamState, rfJamInd, rfAgcPct, rfAntStatus, rfNoise, spoofState;
     extern uint32_t ttffMs;
+    extern uint32_t odoDist, odoTotal;
     extern float errMajorM, errMinorM, errOrientDeg;
 
     // Link diagnostics (defined in main.cpp)
@@ -131,6 +132,22 @@
     // CFG-ITFM-ENABLE = 0x1041000d. Non-fatal if the module ignores it.
     cfgValSetU1(gps, 0x1041000d, 1);
 
+    // AssistNow Autonomous: the receiver predicts satellite orbits on-chip (no
+    // network needed) so cold starts after a power cycle acquire much faster.
+    // CFG-ANA-USE_ANA = 0x10230001. Non-fatal if the module ignores it.
+    cfgValSetU1(gps, 0x10230001, 1);
+
+    // On-chip odometer: hardware-filtered cumulative ground distance, accurate at
+    // low speed and immune to GPS jitter. Enable it, pick a walking/cycling-ish
+    // profile, and emit NAV-ODO (01 09) ~1 Hz.
+    cfgValSetU1(gps, 0x10220001, 1);   // CFG-ODO-USE_ODO = 1
+    cfgValSetU1(gps, 0x20220005, 0);   // CFG-ODO-PROFILE = 0 (running) — low-speed tuned
+    cfgMsgRate(gps, 0x01, 0x09, 5);    // NAV-ODO every 5th epoch (~1 Hz)
+
+    // Zero the trip odometer at boot so NAV-ODO "distance" reads distance-since
+    // -power-on; UBX-NAV-RESETODO (01 10) takes an empty payload.
+    sendUbx(gps, 0x01, 0x10, nullptr, 0);
+
     // Disable common NMEA sentences (class 0xF0)
     cfgMsgRate(gps, 0xF0, 0x00, 0); // GGA
     cfgMsgRate(gps, 0xF0, 0x03, 0); // GSV
@@ -224,9 +241,17 @@
     const uint8_t *b = p + 4;              // first RF block (single band on M9N)
     rfJamState  = b[1] & 0x03;             // flags: jammingState (0..3)
     rfAntStatus = b[2];                    // 0 init,1 unknown,2 ok,3 short,4 open
+    rfNoise = (int)u16(b + 12);            // noisePerMS, broadband noise floor
     uint16_t agc = u16(b + 14);            // agcCnt, 0..8191
     rfAgcPct = (int)((uint32_t)agc * 100u / 8191u);
     rfJamInd = b[16];                      // CW jamming indicator, 0..255
+    }
+
+    // NAV-ODO (01 09) length 20 — on-chip odometer (ground distance in metres).
+    static void handleNavOdo(const uint8_t *p, uint16_t n) {
+    if (n < 20) return;
+    odoDist  = u32(p + 8);                  // distance since last reset (m)
+    odoTotal = u32(p + 12);                 // lifetime total distance (m)
     }
 
     // NAV-COV (01 36) length 64 — position/velocity covariance (NED, m^2).
@@ -306,6 +331,7 @@
     else if (cls == 0x01 && id == 0x03) { diagNavStatus++; handleNavStatus(p, n); }
     else if (cls == 0x01 && id == 0x36) { diagNavCov++;    handleNavCov(p, n); }
     else if (cls == 0x01 && id == 0x35) { diagNavSat++;    handleNavSat(p, n); }
+    else if (cls == 0x01 && id == 0x09) {                  handleNavOdo(p, n); }
     else if (cls == 0x0A && id == 0x38) { diagMonRf++;     handleMonRf(p, n); }
     }
 

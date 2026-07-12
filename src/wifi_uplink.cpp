@@ -17,8 +17,9 @@ extern int satellitesSCRN1;
 extern int fixType;
 extern bool gpsFix;
 extern bool sbasUsed;
-extern int rfJamState, rfJamInd, rfAgcPct, rfAntStatus, spoofState;
+extern int rfJamState, rfJamInd, rfAgcPct, rfAntStatus, rfNoise, spoofState;
 extern uint32_t ttffMs;
+extern uint32_t odoDist, odoTotal;
 extern float errMajorM, errMinorM, errOrientDeg;
 extern String timeUTC, dateUTC;
 
@@ -70,9 +71,12 @@ static String buildJson() {
   s += "\"jam_state\":";    s += rfJamState;            s += ",";
   s += "\"jam_ind\":";      s += rfJamInd;              s += ",";
   s += "\"agc_pct\":";      s += rfAgcPct;              s += ",";
+  s += "\"noise\":";        s += rfNoise;               s += ",";
   s += "\"ant_status\":";   s += rfAntStatus;           s += ",";
   s += "\"spoof_state\":";  s += spoofState;            s += ",";
   s += "\"ttff_ms\":";      s += String(ttffMs);        s += ",";
+  s += "\"odo_m\":";        s += String(odoDist);       s += ",";
+  s += "\"odo_total_m\":";  s += String(odoTotal);      s += ",";
   s += "\"err_major_m\":";  s += String(errMajorM, 2);  s += ",";
   s += "\"err_minor_m\":";  s += String(errMinorM, 2);  s += ",";
   s += "\"err_orient_deg\":"; s += String(errOrientDeg, 1); s += ",";
@@ -132,8 +136,27 @@ void wifiUplinkInit() {
   }
   g_enabled = true;
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(true);   // modem sleep between posts — big cut in average radio
-                         // current so the LCD+GPS+WiFi peak stops browning out.
+  // Print the exact reason on every disconnect (15=wrong password/handshake
+  // timeout, 201=AP not found, 2/4=auth issues, 3/8=deauth/assoc-leave, etc.).
+  WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+    if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+      Serial.printf("[uplink] WiFi disconnected, reason=%u\n", info.wifi_sta_disconnected.reason);
+    }
+  });
+  WiFi.setSleep(false);  // keep radio fully awake — modem sleep can make some APs
+                         // deauth during the auth handshake (seen as reason=2).
+  WiFi.setAutoReconnect(true);
+
+  // One-shot diagnostic: is the target AP visible from here, and how strong?
+  int n = WiFi.scanNetworks();
+  int best = -999;
+  for (int i = 0; i < n; i++) {
+    if (WiFi.SSID(i) == String(WIFI_SSID) && WiFi.RSSI(i) > best) best = WiFi.RSSI(i);
+  }
+  if (best > -900) Serial.printf("[uplink] AP \"%s\" seen at %d dBm (%d nets in range)\n", WIFI_SSID, best, n);
+  else Serial.printf("[uplink] AP \"%s\" NOT FOUND (%d nets in range)\n", WIFI_SSID, n);
+  WiFi.scanDelete();
+
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.printf("[uplink] WiFi connecting to \"%s\"...\n", WIFI_SSID);
 }
@@ -144,10 +167,13 @@ void wifiUplinkLoop() {
   uint32_t now = millis();
 
   if (WiFi.status() != WL_CONNECTED) {
-    if (now - g_lastReconnect > 15000) {
+    if (now - g_lastReconnect > 20000) {
       g_lastReconnect = now;
-      Serial.println("[uplink] WiFi not connected, retrying...");
-      WiFi.disconnect();
+      Serial.printf("[uplink] WiFi status=%d rssi=%d, reconnecting...\n", (int)WiFi.status(), (int)WiFi.RSSI());
+      // Fully reset the STA (radio off) before begin(), otherwise begin() while
+      // still mid-association throws "cannot set config" and never recovers.
+      WiFi.disconnect(true);
+      delay(50);
       WiFi.begin(WIFI_SSID, WIFI_PASS);
     }
     return;

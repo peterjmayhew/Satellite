@@ -65,8 +65,13 @@ int rfJamState = 0;      // 0 = unknown, 1 = ok, 2 = warning, 3 = critical
 int rfJamInd = 0;        // CW jamming indicator, 0..255
 int rfAgcPct = 0;        // automatic gain control level as a percentage (0..100)
 int rfAntStatus = 0;     // 0 = init, 1 = unknown, 2 = ok, 3 = short, 4 = open
+int rfNoise = 0;         // MON-RF broadband noise floor (noisePerMS, receiver units)
 int spoofState = 0;      // 0 = unknown, 1 = none, 2 = indicated, 3 = multiple
 uint32_t ttffMs = 0;     // time to first fix (ms)
+
+// On-chip odometer (UBX NAV-ODO): hardware-filtered ground distance (m)
+uint32_t odoDist = 0;    // distance since last reset (this power-on)
+uint32_t odoTotal = 0;   // lifetime cumulative distance
 
 // Horizontal error ellipse (from UBX NAV-COV position covariance)
 float errMajorM = 0.0;   // semi-major axis 1-sigma std dev (m)
