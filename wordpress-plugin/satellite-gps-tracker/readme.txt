@@ -4,7 +4,7 @@ Tags: gps, gnss, tracker, esp32, map
 Requires at least: 5.8
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.4.6
+Stable tag: 1.4.7
 License: GPLv2 or later
 
 Receive live GNSS telemetry from an ESP32 satellite receiver and present it as an
@@ -61,7 +61,7 @@ compared). Read endpoints are admin-only unless you enable "Public dashboard".
 
 == Changelog ==
 
-= 1.4.6 =
+= 1.4.7 =
 * Clearer "Receiver health & integrity" section. Every tile now has honest
   labels, a plain-English "?" explainer, real good/watch/problem thresholds and
   a distinct grey "not measured" state, so a blank reading no longer looks like a
@@ -73,7 +73,12 @@ compared). Read endpoints are admin-only unless you enable "Public dashboard".
   tile (MON-RF noisePerMS) to sit alongside the narrowband CW indicator, and an
   on-chip **Odometer** (UBX NAV-ODO) tile showing hardware-filtered distance
   since power-on plus lifetime total — accurate at low speed and immune to the
-  GPS jitter that can inflate a track-integrated distance.
+  GPS jitter that can inflate a track-integrated distance. Requires device
+  firmware v1.08+ (the ESP32 side that sends these fields).
+* The ingest endpoint now stores the new `noise`, `odo_m` and `odo_total_m`
+  fields (schema bumped, migrated automatically on upgrade) and returns them from
+  the `latest` endpoint, so the new tiles populate. (Supersedes the incomplete
+  1.4.6 release, which added the tiles but not their server-side storage.)
 
 = 1.4.5 =
 * New shortcode option: `[satgps_dashboard hide_map="1"]` hides the map and
