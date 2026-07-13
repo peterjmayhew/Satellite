@@ -123,6 +123,21 @@ if ( ! defined( 'ABSPATH' ) ) {
 		</section>
 	</div>
 
+	<!-- Trips (detected journeys) + playback -->
+	<section class="satgps-card">
+		<h2><?php esc_html_e( 'Trips', 'satgps' ); ?>
+			<button type="button" class="satgps-help" data-help="trips" aria-label="<?php esc_attr_e( 'What is this?', 'satgps' ); ?>">?</button>
+			<span class="satgps-muted" data-field="trips_count" style="margin-left:auto"></span>
+		</h2>
+		<div class="satgps-playback" id="satgps-playback" hidden>
+			<button type="button" class="satgps-btn" id="satgps-play" aria-label="<?php esc_attr_e( 'Play trip', 'satgps' ); ?>">▶</button>
+			<input type="range" id="satgps-scrub" class="satgps-scrub" min="0" max="0" value="0" aria-label="<?php esc_attr_e( 'Trip position', 'satgps' ); ?>" />
+			<span class="satgps-playback-readout" data-field="playback_readout"></span>
+		</div>
+		<div class="satgps-trip-empty satgps-muted" data-field="trips_empty" hidden><?php esc_html_e( 'No trips detected in this range — the tracker has not moved far enough. A trip is logged once it travels beyond a stationary spot.', 'satgps' ); ?></div>
+		<ul class="satgps-trip-list" id="satgps-trip-list"></ul>
+	</section>
+
 	<!-- Signal + constellation -->
 	<div class="satgps-grid-2">
 		<section class="satgps-card">

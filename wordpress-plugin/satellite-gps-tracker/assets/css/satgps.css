@@ -207,6 +207,25 @@
 .satgps-spectrum-wrap { width: 100%; overflow-x: auto; }
 .satgps-spectrum { width: 100%; height: 240px; display: block; }
 .satgps-spectrum-meta { margin-top: 8px; font-size: 12px; }
+
+/* Trips list + playback. */
+.satgps-trip-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.satgps-trip-item { display: grid; grid-template-columns: 1fr auto auto auto; gap: 12px; align-items: center;
+	padding: 9px 12px; border: 1px solid var(--satgps-border); border-radius: 8px; background: var(--satgps-card-2);
+	cursor: pointer; transition: border-color .15s ease, background-color .15s ease; }
+.satgps-trip-item:hover { border-color: var(--satgps-accent, #4c8bf5); }
+.satgps-trip-item.is-selected { border-color: #f59e0b; background: rgba(245, 158, 11, .08); }
+.satgps-trip-when { font-weight: 600; }
+.satgps-trip-item .satgps-muted { font-size: 12px; font-variant-numeric: tabular-nums; }
+.satgps-playback { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+/* An author `display` beats the UA `[hidden]{display:none}` rule, so guard it explicitly. */
+.satgps-playback[hidden] { display: none !important; }
+.satgps-btn { background: var(--satgps-card-2); color: var(--text-primary, #e7ecf5); border: 1px solid var(--satgps-border);
+	border-radius: 8px; padding: 6px 12px; font-size: 15px; line-height: 1; cursor: pointer; min-width: 40px; }
+.satgps-btn:hover { border-color: var(--satgps-accent, #4c8bf5); }
+.satgps-scrub { flex: 1; accent-color: #f59e0b; }
+.satgps-playback-readout { color: var(--satgps-muted); font-size: 12px; font-variant-numeric: tabular-nums; min-width: 150px; text-align: right; }
+@media (max-width: 640px) { .satgps-trip-item { grid-template-columns: 1fr auto; } }
 .satgps-const-count { text-align: right; color: var(--satgps-muted); font-variant-numeric: tabular-nums; }
 
 .satgps-muted { color: var(--satgps-muted); font-weight: 400; font-size: 12px; }

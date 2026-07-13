@@ -64,6 +64,16 @@ class SatGPS_REST {
 
 		register_rest_route(
 			SATGPS_REST_NS,
+			'/trips',
+			array(
+				'methods'             => 'GET',
+				'callback'            => array( $this, 'trips' ),
+				'permission_callback' => $read_perm,
+			)
+		);
+
+		register_rest_route(
+			SATGPS_REST_NS,
 			'/stats',
 			array(
 				'methods'             => 'GET',
@@ -547,6 +557,158 @@ class SatGPS_REST {
 				'points' => $points,
 			)
 		);
+	}
+
+	/**
+	 * Detected trips (journeys) for a device/window: the track segmented into
+	 * moving runs bracketed by stops. Each trip carries summary stats + a
+	 * downsampled point list for map playback.
+	 *
+	 * @param WP_REST_Request $request Request.
+	 * @return WP_REST_Response
+	 */
+	public function trips( $request ) {
+		$device_raw = $request->get_param( 'device' );
+		$device     = is_scalar( $device_raw ) ? sanitize_text_field( (string) $device_raw ) : '';
+		$from       = $this->to_mysql_utc( $request->get_param( 'from' ) );
+		$to         = $this->to_mysql_utc( $request->get_param( 'to' ) );
+
+		$rows  = SatGPS_DB::get_track( $device, $from, $to, 10000 );
+		$trips = $this->segment_trips( $rows );
+
+		return rest_ensure_response(
+			array(
+				'device' => $device,
+				'count'  => count( $trips ),
+				'trips'  => $trips,
+			)
+		);
+	}
+
+	/**
+	 * Segment an ordered list of fixes into trips.
+	 *
+	 * A trip is a maximal run of movement (speed >= MOVE km/h), tolerating brief
+	 * stops; it ends when the device is stopped for >= STOP seconds or a data gap
+	 * >= GAP seconds appears. Trailing stopped points are trimmed, and trips shorter
+	 * than MIN_DIST / MIN_DUR are discarded as noise.
+	 *
+	 * @param array $rows Ordered fixes (ascending ts) from SatGPS_DB::get_track().
+	 * @return array List of trip arrays.
+	 */
+	private function segment_trips( $rows ) {
+		$MOVE_KMH = 3.0;    // moving threshold
+		$STOP_S   = 120;    // stopped this long ends a trip
+		$GAP_S    = 300;    // data gap this long splits trips
+		$MIN_DIST = 0.10;   // km — discard trips shorter than this
+		$MIN_DUR  = 60;     // s  — discard trips shorter than this
+		$MAX_PTS  = 400;    // downsample cap per trip (for playback)
+
+		$trips    = array();
+		$cur      = array();  // current trip's raw points
+		$last_move_idx = -1;  // index in $cur of the last moving point
+		$last_move_ts  = 0;
+		$prev_ts       = null;
+
+		$finalize = function ( $pts, $move_idx ) use ( &$trips, $MIN_DIST, $MIN_DUR, $MAX_PTS ) {
+			if ( $move_idx < 1 ) {
+				return; // need at least two points ending on movement
+			}
+			$pts = array_slice( $pts, 0, $move_idx + 1 ); // drop trailing stopped tail
+			if ( count( $pts ) < 2 ) {
+				return;
+			}
+			$dist_km  = 0.0;
+			$max_kmh  = 0.0;
+			$sum_kmh  = 0.0;
+			for ( $i = 0; $i < count( $pts ); $i++ ) {
+				$sp      = (float) $pts[ $i ]['speed_kmh'];
+				$max_kmh = max( $max_kmh, $sp );
+				$sum_kmh += $sp;
+				if ( $i > 0 ) {
+					$dist_km += $this->haversine_km(
+						(float) $pts[ $i - 1 ]['lat'], (float) $pts[ $i - 1 ]['lon'],
+						(float) $pts[ $i ]['lat'], (float) $pts[ $i ]['lon']
+					);
+				}
+			}
+			$dur_s = max( 0, strtotime( $pts[ count( $pts ) - 1 ]['ts'] ) - strtotime( $pts[0]['ts'] ) );
+			if ( $dist_km < $MIN_DIST || $dur_s < $MIN_DUR ) {
+				return;
+			}
+			// Downsample for playback.
+			$n = count( $pts );
+			$out_pts = array();
+			$step = $n > $MAX_PTS ? $n / $MAX_PTS : 1;
+			$last_idx = -1;
+			for ( $f = 0.0; (int) floor( $f ) < $n; $f += $step ) {
+				$last_idx = (int) floor( $f );
+				$p = $pts[ $last_idx ];
+				$out_pts[] = array(
+					'lat' => (float) $p['lat'],
+					'lon' => (float) $p['lon'],
+					'ts'  => $p['ts'],
+					'spd' => round( (float) $p['speed_kmh'], 1 ),
+				);
+			}
+			$lastp = $pts[ $n - 1 ];
+			// Include the final point only if downsampling skipped it (avoids a
+			// duplicate last frame when step == 1, i.e. n <= MAX_PTS).
+			if ( $last_idx !== $n - 1 ) {
+				$out_pts[] = array(
+					'lat' => (float) $lastp['lat'],
+					'lon' => (float) $lastp['lon'],
+					'ts'  => $lastp['ts'],
+					'spd' => round( (float) $lastp['speed_kmh'], 1 ),
+				);
+			}
+			$trips[] = array(
+				'id'            => count( $trips ),
+				'start_ts'      => $pts[0]['ts'],
+				'end_ts'        => $lastp['ts'],
+				'duration_s'    => $dur_s,
+				'distance_km'   => round( $dist_km, 3 ),
+				'max_speed_kmh' => round( $max_kmh, 1 ),
+				'avg_speed_kmh' => round( $sum_kmh / $n, 1 ),
+				'point_count'   => $n,
+				'points'        => $out_pts,
+			);
+		};
+
+		foreach ( $rows as $r ) {
+			$ts     = strtotime( $r['ts'] );
+			$gap    = ( null !== $prev_ts ) ? ( $ts - $prev_ts ) : 0;
+			$prev_ts = $ts;
+			$moving = (float) $r['speed_kmh'] >= $MOVE_KMH;
+
+			if ( $gap >= $GAP_S && ! empty( $cur ) ) {
+				$finalize( $cur, $last_move_idx );
+				$cur = array();
+				$last_move_idx = -1;
+			}
+
+			if ( empty( $cur ) ) {
+				if ( $moving ) {
+					$cur = array( $r );
+					$last_move_idx = 0;
+					$last_move_ts  = $ts;
+				}
+				continue;
+			}
+
+			$cur[] = $r;
+			if ( $moving ) {
+				$last_move_idx = count( $cur ) - 1;
+				$last_move_ts  = $ts;
+			} elseif ( $ts - $last_move_ts >= $STOP_S ) {
+				$finalize( $cur, $last_move_idx );
+				$cur = array();
+				$last_move_idx = -1;
+			}
+		}
+		$finalize( $cur, $last_move_idx );
+
+		return $trips;
 	}
 
 	/**

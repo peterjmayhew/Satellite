@@ -4,7 +4,7 @@ Tags: gps, gnss, tracker, esp32, map
 Requires at least: 5.8
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.4.11
+Stable tag: 1.4.12
 License: GPLv2 or later
 
 Receive live GNSS telemetry from an ESP32 satellite receiver and present it as an
@@ -60,6 +60,14 @@ Ingest requires the secret API key in the `X-API-Key` header (constant-time
 compared). Read endpoints are admin-only unless you enable "Public dashboard".
 
 == Changelog ==
+
+= 1.4.12 =
+* New **Trips** card: the track is automatically segmented into journeys (start
+  on movement, end on a stop or data gap), each shown with its time, duration,
+  distance and top speed. Click a trip to draw it on the map and **play it
+  back** — animate a marker along the route or scrub with the slider, with the
+  time and speed at each moment. Served by a new /trips REST route (computed
+  from stored fixes; no new device data).
 
 = 1.4.11 =
 * New **Spectrum waterfall** card: the RF spectrum stacked over time as a colour

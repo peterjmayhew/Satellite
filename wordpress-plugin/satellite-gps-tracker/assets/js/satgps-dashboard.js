@@ -203,7 +203,8 @@
 		range: '24h',
 		live: true,
 		map: null, marker: null, accCircle: null, accEllipse: null, track: null, trackLayers: [],
-		charts: {}
+		charts: {},
+		trips: [], playback: null
 	};
 
 	var frontend = document.querySelector('.satgps-frontend');
@@ -782,7 +783,116 @@
 			setField('max_alt', s.max_alt.toFixed(0));
 			setField('points', s.points);
 		});
+		refreshTrips();
 		return Promise.all([p1, p2]).catch(function () {});
+	}
+
+	// ---- trips + playback -------------------------------------------------
+	function fmtClock(ts) {
+		var d = new Date(isoZ(ts));
+		return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	}
+	function fmtDate(ts) {
+		var d = new Date(isoZ(ts));
+		return isNaN(d.getTime()) ? '' : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+	}
+	function setPlayButton(playing) {
+		var b = $('#satgps-play'); if (b) { b.textContent = playing ? '❚❚' : '▶'; }
+	}
+
+	function refreshTrips() {
+		return api('trips', { device: state.device, from: rangeToFrom(state.range) }).then(function (res) {
+			state.trips = (res && res.trips) || [];
+			renderTrips();
+		}).catch(function () { state.trips = []; renderTrips(); });
+	}
+
+	function renderTrips() {
+		var list = $('#satgps-trip-list'), empty = field('trips_empty');
+		stopPlayback();
+		setField('trips_count', state.trips.length ? state.trips.length + (state.trips.length === 1 ? ' trip' : ' trips') : '');
+		if (!list) { return; }
+		if (!state.trips.length) {
+			list.innerHTML = '';
+			if (empty) { empty.hidden = false; }
+			return;
+		}
+		if (empty) { empty.hidden = true; }
+		var html = '';
+		state.trips.forEach(function (t, i) {
+			html += '<li class="satgps-trip-item" data-trip="' + i + '">' +
+				'<span class="satgps-trip-when">' + esc(fmtDate(t.start_ts)) + ' ' + esc(fmtClock(t.start_ts)) + '</span>' +
+				'<span class="satgps-muted">' + fmtDuration(t.duration_s) + '</span>' +
+				'<span class="satgps-muted">' + dist(t.distance_km).toFixed(2) + ' ' + distUnit + '</span>' +
+				'<span class="satgps-muted">' + spd(t.max_speed_kmh).toFixed(0) + ' ' + spdUnit + '</span>' +
+				'</li>';
+		});
+		list.innerHTML = html;
+	}
+
+	function selectTrip(i) {
+		var t = state.trips[i];
+		if (!t || !t.points || !t.points.length) { return; }
+		stopPlayback();
+		document.querySelectorAll('.satgps-trip-item').forEach(function (el) {
+			el.classList.toggle('is-selected', String(el.dataset.trip) === String(i));
+		});
+		var latlngs = t.points.map(function (p) { return [p.lat, p.lon]; });
+		var pb = { trip: t, latlngs: latlngs, idx: 0, playing: false, timer: null, layer: null, marker: null };
+		if (state.map) {
+			pb.layer = L.polyline(latlngs, { color: '#f59e0b', weight: 4, opacity: 0.9 }).addTo(state.map);
+			pb.marker = L.circleMarker(latlngs[0], { radius: 7, color: '#fff', weight: 2, fillColor: '#f59e0b', fillOpacity: 1 }).addTo(state.map);
+			try { state.map.fitBounds(pb.layer.getBounds().pad(0.15)); } catch (e) {}
+		}
+		state.playback = pb;
+		var scrub = $('#satgps-scrub'), panel = $('#satgps-playback');
+		if (scrub) { scrub.max = latlngs.length - 1; scrub.value = 0; }
+		if (panel) { panel.hidden = false; }
+		playbackSeek(0);
+	}
+
+	function playbackSeek(idx) {
+		var pb = state.playback; if (!pb) { return; }
+		pb.idx = Math.max(0, Math.min(pb.latlngs.length - 1, idx));
+		if (pb.marker) { pb.marker.setLatLng(pb.latlngs[pb.idx]); }
+		var scrub = $('#satgps-scrub'); if (scrub && String(scrub.value) !== String(pb.idx)) { scrub.value = pb.idx; }
+		var p = pb.trip.points[pb.idx];
+		setField('playback_readout', fmtClock(p.ts) + ' · ' + spd(p.spd).toFixed(0) + ' ' + spdUnit + ' · ' + (pb.idx + 1) + '/' + pb.latlngs.length);
+	}
+
+	function playbackPlay() {
+		var pb = state.playback; if (!pb) { return; }
+		if (pb.idx >= pb.latlngs.length - 1) { playbackSeek(0); } // restart if at the end
+		pb.playing = true;
+		setPlayButton(true);
+		var stepMs = Math.max(40, Math.min(300, Math.round(12000 / pb.latlngs.length))); // whole trip ~12s
+		pb.timer = setInterval(function () {
+			if (state.playback !== pb) { clearInterval(pb.timer); return; }
+			if (pb.idx >= pb.latlngs.length - 1) { pausePlayback(); return; }
+			playbackSeek(pb.idx + 1);
+		}, stepMs);
+	}
+
+	function pausePlayback() {
+		var pb = state.playback; if (!pb) { return; }
+		pb.playing = false;
+		if (pb.timer) { clearInterval(pb.timer); pb.timer = null; }
+		setPlayButton(false);
+	}
+
+	function stopPlayback() {
+		var pb = state.playback;
+		if (pb) {
+			if (pb.timer) { clearInterval(pb.timer); }
+			if (state.map) {
+				if (pb.layer) { state.map.removeLayer(pb.layer); }
+				if (pb.marker) { state.map.removeLayer(pb.marker); }
+			}
+		}
+		state.playback = null;
+		var panel = $('#satgps-playback'); if (panel) { panel.hidden = true; }
+		setPlayButton(false);
+		document.querySelectorAll('.satgps-trip-item.is-selected').forEach(function (el) { el.classList.remove('is-selected'); });
 	}
 
 	function loadDevices() {
@@ -863,7 +973,8 @@
 		sbas: '<h3>SBAS augmentation</h3><p>SBAS (Satellite-Based Augmentation System) is a free correction service broadcast from geostationary satellites — <b>EGNOS</b> over Europe, WAAS over North America, MSAS over Japan, GAGAN over India. It sends small corrections that sharpen the fix and flag any satellite it judges unsafe to use. This tile (from UBX <i>NAV-SBAS</i>) names the system in use, the <b>GEO</b> satellite\'s PRN number the receiver is listening to, and how many satellites are currently being corrected. "Not in use" simply means no SBAS satellite is being tracked right now — often just a low southern-sky view.</p>',
 		uart: '<h3>UART link load</h3><p>The GNSS module streams its data to the ESP32 over a serial (UART) link. This gauge, from UBX <i>MON-COMMS</i>, shows how full the receiver\'s transmit buffer for that link is — essentially the backlog of data waiting to be sent. Low and steady is healthy; a persistently <b>high</b> reading (amber) means the host isn\'t reading the stream fast enough, and an <b>overrun</b> (red) means the buffer filled completely and bytes were dropped. The "peak" figure is the highest level seen in the last monitoring window. It is a plumbing check on the link itself, separate from satellite signal quality.</p>',
 		spectrum: '<h3>Live RF spectrum</h3><p>A real spectrum-analyser sweep from inside the receiver (UBX <i>MON-SPAN</i>): the strength of every radio frequency across the band around <b>GPS L1</b> (~1575 MHz, marked). The satellite signals themselves are far too weak to see — what you are looking at is the noise floor. A flat, even floor is healthy; a sharp <b>spike</b> or a raised hump is interference (a jammer, a nearby electronic device, or an out-of-band transmitter) that can degrade the fix. The vertical scale is relative dB (comparative, not absolute power), and "PGA" is the internal amplifier gain applied before this sweep.</p>',
-		waterfall: '<h3>Spectrum waterfall</h3><p>The same RF spectrum as above, but stacked over <b>time</b> so you can spot changes. Each horizontal line is one sweep of the band; the newest is at the bottom and older sweeps scroll up. Colour is signal strength — dark = quiet, bright (green→yellow→red) = strong. A steady environment shows smooth vertical bands; a <b>bright horizontal streak</b> is a burst of interference at a moment in time, and a <b>bright vertical stripe</b> is a persistent signal at one frequency. It builds up gradually as new sweeps arrive.</p>'
+		waterfall: '<h3>Spectrum waterfall</h3><p>The same RF spectrum as above, but stacked over <b>time</b> so you can spot changes. Each horizontal line is one sweep of the band; the newest is at the bottom and older sweeps scroll up. Colour is signal strength — dark = quiet, bright (green→yellow→red) = strong. A steady environment shows smooth vertical bands; a <b>bright horizontal streak</b> is a burst of interference at a moment in time, and a <b>bright vertical stripe</b> is a persistent signal at one frequency. It builds up gradually as new sweeps arrive.</p>',
+		trips: '<h3>Trips</h3><p>The track in the selected range is automatically split into <b>journeys</b> — a trip starts when the tracker begins moving and ends when it stops for a couple of minutes (or after a gap in the data). Each row shows when the trip started, how long it lasted, how far it went, and its top speed; very short hops are ignored. Click a trip to draw it on the map and <b>play it back</b>: press ▶ to animate a marker along the route, or drag the slider to scrub to any point. The time and speed at that moment are shown alongside.</p>'
 	};
 	function initHelp() {
 		var modal = $('#satgps-help-modal'), content = $('#satgps-help-content');
@@ -896,6 +1007,20 @@
 		if (csvBtn) csvBtn.addEventListener('click', function () { exportTrack('csv', csvBtn); });
 		var gpxBtn = $('#satgps-export-gpx');
 		if (gpxBtn) gpxBtn.addEventListener('click', function () { exportTrack('gpx', gpxBtn); });
+
+		// Trips: click a row to select + playback controls.
+		var tripList = $('#satgps-trip-list');
+		if (tripList) tripList.addEventListener('click', function (e) {
+			var li = e.target.closest ? e.target.closest('.satgps-trip-item') : null;
+			if (li && li.dataset.trip != null) { selectTrip(parseInt(li.dataset.trip, 10)); }
+		});
+		var playBtn = $('#satgps-play');
+		if (playBtn) playBtn.addEventListener('click', function () {
+			if (!state.playback) { return; }
+			if (state.playback.playing) { pausePlayback(); } else { playbackPlay(); }
+		});
+		var scrub = $('#satgps-scrub');
+		if (scrub) scrub.addEventListener('input', function () { pausePlayback(); playbackSeek(parseInt(scrub.value, 10) || 0); });
 	}
 
 	function init() {
